@@ -14,6 +14,9 @@ export function issueAccessToken(user) {
       sub: user.id,
       email: user.email,
       role: user.role,
+      permissions: Array.isArray(user.permissionCodes)
+        ? user.permissionCodes
+        : [],
       firebaseUid: user.firebaseUid,
       type: "access",
     },

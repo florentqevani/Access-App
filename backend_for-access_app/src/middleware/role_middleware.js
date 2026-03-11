@@ -4,11 +4,13 @@ const requireRole = (allowedRoles = []) => {
       return res.status(401).json({ error: "Unauthorized" });
     }
 
-    const normalizedRoles = Array.isArray(allowedRoles)
+    const normalizedRoles = (Array.isArray(allowedRoles)
       ? allowedRoles
-      : [allowedRoles];
+      : [allowedRoles]
+    ).map((role) => String(role).toLowerCase());
 
-    if (!normalizedRoles.includes(req.user.role)) {
+    const userRole = String(req.user.role || "").toLowerCase();
+    if (!normalizedRoles.includes(userRole)) {
       return res
         .status(403)
         .json({ error: "Forbidden: Insufficient permissions" });

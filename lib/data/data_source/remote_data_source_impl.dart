@@ -1,9 +1,12 @@
+import 'dart:convert';
+
 import 'package:access_app/core/errors/server_exception.dart';
+import 'package:access_app/core/network/auth_server_config.dart';
 import 'package:access_app/data/data_source/remote_data_source.dart';
 import 'package:access_app/domain/repository/auth_session.dart';
+import 'package:access_app/domain/repository/auth_user.dart';
 import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:flutter/foundation.dart';
 
 class RemoteDataSourceImpl implements RemoteDataSource {
   final FirebaseAuth firebaseAuth;
@@ -14,7 +17,7 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     required this.firebaseAuth,
     required String authServerBaseUrl,
     required this.dio,
-  }) : authServerBaseUrl = _normalizeBaseUrl(authServerBaseUrl);
+  }) : authServerBaseUrl = normalizeAuthServerBaseUrl(authServerBaseUrl);
   @override
   Future<AuthSession> loginWithEmail({
     required String email,
@@ -181,12 +184,104 @@ class RemoteDataSourceImpl implements RemoteDataSource {
       );
     }
 
+    final user = _parseUser(payload['user'], accessToken: accessToken);
+
     return AuthSession(
       accessToken: accessToken,
       refreshToken: refreshToken as String?,
       accessTokenExpiresAt: accessTokenExpiresAt,
       refreshTokenExpiresAt: refreshTokenExpiresAt,
+      user: user,
     );
+  }
+
+  AuthUser _parseUser(dynamic rawUser, {required String accessToken}) {
+    if (rawUser is Map) {
+      final userMap = Map<String, dynamic>.from(rawUser);
+      final id = userMap['id'];
+      final role = userMap['role'];
+
+      if (id is String && id.isNotEmpty && role is String && role.isNotEmpty) {
+        return AuthUser(
+          id: id,
+          email: userMap['email'] as String?,
+          displayName: userMap['displayName'] as String?,
+          role: role,
+          permissions: _parsePermissions(userMap['permissions']),
+        );
+      }
+    }
+
+    final claims = _decodeJwtClaims(accessToken);
+    final id = claims['sub'];
+    final role = claims['role'];
+    if (id is String && id.isNotEmpty && role is String && role.isNotEmpty) {
+      final decodedPermissions = claims['permissions'];
+      return AuthUser(
+        id: id,
+        email: claims['email'] as String?,
+        displayName: null,
+        role: role,
+        permissions: _parsePermissions(decodedPermissions),
+      );
+    }
+
+    throw const ServerException(
+      'Server did not return a valid authenticated user payload.',
+    );
+  }
+
+  List<AuthPermission> _parsePermissions(dynamic rawPermissions) {
+    if (rawPermissions is List) {
+      final permissions = <AuthPermission>[];
+      for (final item in rawPermissions) {
+        if (item is Map) {
+          final permission = Map<String, dynamic>.from(item);
+          final resource = permission['resource'];
+          final action = permission['action'];
+          final scope = permission['scope'];
+          if (resource is String && action is String && scope is String) {
+            permissions.add(
+              AuthPermission(resource: resource, action: action, scope: scope),
+            );
+          }
+        } else if (item is String && item.contains(':')) {
+          final parts = item.split(':');
+          if (parts.length >= 2) {
+            permissions.add(
+              AuthPermission(
+                resource: parts[0],
+                action: parts[1],
+                scope: parts.length > 2 ? parts[2] : 'full',
+              ),
+            );
+          }
+        }
+      }
+      return permissions;
+    }
+    return const <AuthPermission>[];
+  }
+
+  Map<String, dynamic> _decodeJwtClaims(String token) {
+    final tokenParts = token.split('.');
+    if (tokenParts.length < 2) {
+      return const {};
+    }
+
+    try {
+      final normalized = base64Url.normalize(tokenParts[1]);
+      final payloadBytes = base64Url.decode(normalized);
+      final payloadString = utf8.decode(payloadBytes);
+      final dynamic decoded = jsonDecode(payloadString);
+      if (decoded is Map) {
+        return Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {
+      return const {};
+    }
+
+    return const {};
   }
 
   Map<String, dynamic> _readPayload(dynamic data) {
@@ -257,25 +352,4 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     }
   }
 
-  static String _normalizeBaseUrl(String rawBaseUrl) {
-    final trimmed = rawBaseUrl.trim();
-    if (trimmed.isEmpty) {
-      return rawBaseUrl;
-    }
-
-    if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) {
-      return trimmed;
-    }
-
-    final uri = Uri.tryParse(trimmed);
-    if (uri == null || uri.host.isEmpty) {
-      return trimmed;
-    }
-
-    if (uri.host == 'localhost' || uri.host == '127.0.0.1') {
-      return uri.replace(host: '10.0.2.2').toString();
-    }
-
-    return trimmed;
-  }
 }

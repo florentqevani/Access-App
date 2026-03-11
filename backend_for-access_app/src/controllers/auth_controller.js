@@ -6,9 +6,11 @@ import {
   verifyRefreshToken,
   getAccessTokenExpiryDate,
   getRefreshTokenExpiryDate,
+  sanitizeUser,
 } from "../data/tokens.js";
 import { getFirebaseAuth, hasFirebaseAdminCredentials } from "../config/firebase.js";
 import { hashToken } from "../utils/crypto.js";
+
 
 export async function exchangeFirebaseToken(req, res) {
   try {
@@ -126,5 +128,6 @@ async function issueTokens(user) {
     accessTokenExpiresAt: accessTokenExpiresAt.toISOString(),
     refreshTokenExpiresAt: refreshTokenExpiresAt.toISOString(),
     expiresIn: Math.floor((accessTokenExpiresAt.getTime() - Date.now()) / 1000),
+    user: sanitizeUser(user),
   };
 }

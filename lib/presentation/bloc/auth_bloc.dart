@@ -1,4 +1,5 @@
 import 'package:access_app/domain/use_cases/login_use_case.dart';
+import 'package:access_app/domain/repository/auth_session.dart';
 import 'package:access_app/domain/use_cases/refresh_session_use_case.dart';
 import 'package:access_app/domain/use_cases/revoke_refresh_token_use_case.dart';
 import 'package:access_app/domain/use_cases/signup_use_case.dart';
@@ -18,11 +19,7 @@ class AuthSignUp extends AuthEvent {
   final String email;
   final String password;
 
-  AuthSignUp({
-    required this.name,
-    required this.email,
-    required this.password,
-  });
+  AuthSignUp({required this.name, required this.email, required this.password});
 }
 
 class AuthRefreshSession extends AuthEvent {
@@ -43,7 +40,11 @@ class AuthInitial extends AuthState {}
 
 class AuthLoading extends AuthState {}
 
-class AuthSuccess extends AuthState {}
+class AuthAuthenticated extends AuthState {
+  final AuthSession session;
+
+  AuthAuthenticated(this.session);
+}
 
 class AuthFailure extends AuthState {
   final String message;
@@ -74,7 +75,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       await response.fold(
         (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthSuccess()),
+        (session) async => emit(AuthAuthenticated(session)),
       );
     });
 
@@ -89,7 +90,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       await response.fold(
         (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthSuccess()),
+        (session) async => emit(AuthAuthenticated(session)),
       );
     });
 
@@ -100,7 +101,7 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
       );
       await response.fold(
         (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthSuccess()),
+        (session) async => emit(AuthAuthenticated(session)),
       );
     });
 

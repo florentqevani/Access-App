@@ -1,4 +1,5 @@
 import 'package:access_app/core/theme/theme.dart';
+import 'package:access_app/core/network/auth_server_config.dart';
 import 'package:access_app/data/data_source/remote_data_source_impl.dart';
 import 'package:access_app/data/repositories/auth_repository_impl.dart';
 import 'package:access_app/domain/use_cases/login_use_case.dart';
@@ -12,7 +13,6 @@ import 'package:dio/dio.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 void main() async {
@@ -42,9 +42,9 @@ class MyApp extends StatelessWidget {
     );
     final remoteDataSource = RemoteDataSourceImpl(
       firebaseAuth: firebaseAuth,
-      authServerBaseUrl: configuredAuthServerBaseUrl.isEmpty
-          ? _defaultAuthServerBaseUrl()
-          : configuredAuthServerBaseUrl,
+      authServerBaseUrl: resolveAuthServerBaseUrl(
+        configuredBaseUrl: configuredAuthServerBaseUrl,
+      ),
       dio: dio,
     );
     final repository = AuthRepositoryImpl(remoteDataSource);
@@ -67,19 +67,6 @@ class MyApp extends StatelessWidget {
         home: const LoginPage(),
       ),
     );
-  }
-}
-
-String _defaultAuthServerBaseUrl() {
-  if (kIsWeb) {
-    return 'http://localhost:3000';
-  }
-
-  switch (defaultTargetPlatform) {
-    case TargetPlatform.android:
-      return 'http://10.0.2.2:3000';
-    default:
-      return 'http://localhost:3000';
   }
 }
 

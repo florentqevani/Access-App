@@ -1,5 +1,6 @@
 import 'package:access_app/core/Colors/app_pallete.dart';
 import 'package:access_app/presentation/pages/login_page.dart';
+import 'package:access_app/presentation/pages/dashboard.dart';
 import 'package:access_app/presentation/bloc/auth_bloc.dart';
 import 'package:access_app/presentation/widgets/auth_field.dart';
 import 'package:access_app/presentation/widgets/submit_button.dart';
@@ -35,13 +36,16 @@ class _SignUpPageState extends State<SignUpPage> {
       body: BlocConsumer<AuthBloc, AuthState>(
         listener: (context, state) {
           if (state is AuthFailure) {
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(content: Text(state.message)),
-            );
+            ScaffoldMessenger.of(
+              context,
+            ).showSnackBar(SnackBar(content: Text(state.message)));
           }
 
-          if (state is AuthSuccess) {
-            Navigator.pushReplacement(context, LoginPage.route());
+          if (state is AuthAuthenticated) {
+            Navigator.pushReplacement(
+              context,
+              DashboardPage.route(session: state.session),
+            );
           }
         },
         builder: (context, state) {
@@ -57,10 +61,16 @@ class _SignUpPageState extends State<SignUpPage> {
                   children: [
                     const Text(
                       'Sign Up Page',
-                      style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                     const SizedBox(height: 20),
-                    AuthField(label: 'Username', controller: userNameController),
+                    AuthField(
+                      label: 'Username',
+                      controller: userNameController,
+                    ),
                     const SizedBox(height: 15),
                     AuthField(label: 'Email', controller: emailController),
                     const SizedBox(height: 15),
@@ -77,12 +87,12 @@ class _SignUpPageState extends State<SignUpPage> {
                           : () {
                               if (formKey.currentState!.validate()) {
                                 context.read<AuthBloc>().add(
-                                      AuthSignUp(
-                                        name: userNameController.text.trim(),
-                                        email: emailController.text.trim(),
-                                        password: passwordController.text.trim(),
-                                      ),
-                                    );
+                                  AuthSignUp(
+                                    name: userNameController.text.trim(),
+                                    email: emailController.text.trim(),
+                                    password: passwordController.text.trim(),
+                                  ),
+                                );
                               }
                             },
                     ),

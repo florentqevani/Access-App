@@ -10,9 +10,7 @@ class RevokeRefreshTokenUseCase
   const RevokeRefreshTokenUseCase(this.authRepository);
 
   @override
-  Future<Either<Failure, bool>> call(
-    RevokeRefreshTokenParams params,
-  ) async {
+  Future<Either<Failure, bool>> call(RevokeRefreshTokenParams params) async {
     return authRepository.revokeRefreshToken(refreshToken: params.refreshToken);
   }
 }

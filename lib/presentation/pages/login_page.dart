@@ -39,8 +39,11 @@ class _LoginPageState extends State<LoginPage> {
             ).showSnackBar(SnackBar(content: Text(state.message)));
           }
 
-          if (state is AuthSuccess) {
-            Navigator.pushReplacement(context, DashboardPage.route());
+          if (state is AuthAuthenticated) {
+            Navigator.pushReplacement(
+              context,
+              DashboardPage.route(session: state.session),
+            );
           }
         },
         builder: (context, state) {

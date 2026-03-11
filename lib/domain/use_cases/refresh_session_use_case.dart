@@ -11,9 +11,7 @@ class RefreshSessionUseCase
   const RefreshSessionUseCase(this.authRepository);
 
   @override
-  Future<Either<Failure, AuthSession>> call(
-    RefreshSessionParams params,
-  ) async {
+  Future<Either<Failure, AuthSession>> call(RefreshSessionParams params) async {
     return authRepository.refreshSession(refreshToken: params.refreshToken);
   }
 }

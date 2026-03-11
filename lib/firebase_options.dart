@@ -7,10 +7,7 @@ import 'package:flutter/foundation.dart'
 class DefaultFirebaseOptions {
   static FirebaseOptions get currentPlatform {
     if (kIsWeb) {
-      throw UnsupportedError(
-        'DefaultFirebaseOptions have not been configured for web - '
-        'you can reconfigure this by running the FlutterFire CLI again.',
-      );
+      return web;
     }
     switch (defaultTargetPlatform) {
       case TargetPlatform.android:
@@ -18,20 +15,11 @@ class DefaultFirebaseOptions {
       case TargetPlatform.iOS:
         return ios;
       case TargetPlatform.macOS:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for macos - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return web;
       case TargetPlatform.windows:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for windows - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return web;
       case TargetPlatform.linux:
-        throw UnsupportedError(
-          'DefaultFirebaseOptions have not been configured for linux - '
-          'you can reconfigure this by running the FlutterFire CLI again.',
-        );
+        return web;
       default:
         throw UnsupportedError(
           'DefaultFirebaseOptions are not supported for this platform.',
@@ -53,8 +41,35 @@ class DefaultFirebaseOptions {
     messagingSenderId: '206849971594',
     projectId: 'task-manager-76140',
     storageBucket: 'task-manager-76140.firebasestorage.app',
-    iosClientId: '206849971594-gqq3umacdkg9qde5aa5m192k1bbfna6m.apps.googleusercontent.com',
+    iosClientId:
+        '206849971594-gqq3umacdkg9qde5aa5m192k1bbfna6m.apps.googleusercontent.com',
     iosBundleId: 'com.example.accessApp',
   );
 
+  static const FirebaseOptions web = FirebaseOptions(
+    apiKey: String.fromEnvironment(
+      'FIREBASE_WEB_API_KEY',
+      defaultValue: 'AIzaSyBA7L41mADoH7qqib4ztghdQuSrOAwxZLw',
+    ),
+    appId: String.fromEnvironment(
+      'FIREBASE_WEB_APP_ID',
+      defaultValue: '1:206849971594:web:34ec40c0d68df02332a473',
+    ),
+    messagingSenderId: String.fromEnvironment(
+      'FIREBASE_WEB_MESSAGING_SENDER_ID',
+      defaultValue: '206849971594',
+    ),
+    projectId: String.fromEnvironment(
+      'FIREBASE_WEB_PROJECT_ID',
+      defaultValue: 'task-manager-76140',
+    ),
+    authDomain: String.fromEnvironment(
+      'FIREBASE_WEB_AUTH_DOMAIN',
+      defaultValue: 'task-manager-76140.firebaseapp.com',
+    ),
+    storageBucket: String.fromEnvironment(
+      'FIREBASE_WEB_STORAGE_BUCKET',
+      defaultValue: 'task-manager-76140.firebasestorage.app',
+    ),
+  );
 }
