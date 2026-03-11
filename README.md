@@ -1,4 +1,4 @@
-# access_app
+# Access_app
 
 Flutter authentication app with Firebase Auth on the client and a local Node.js auth backend.
 
