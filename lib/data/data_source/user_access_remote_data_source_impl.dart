@@ -25,7 +25,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         data: {'resource': resource, 'action': action},
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to execute action.');
+      _validateStatusCode(response, 'Failed to execute action.');
 
       final payload = _readPayload(response.data);
       final rawEvent = payload['event'];
@@ -51,30 +51,20 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
     int limit = 20,
   }) async {
     try {
-      Response<dynamic> response;
-      try {
+      var response = await dio.get(
+        _usersEndpoint('logs/role-scoped'),
+        queryParameters: {'limit': limit},
+        options: _authorizedOptions(accessToken),
+      );
+      if (response.statusCode == 404) {
+        // Backward compatibility for older backend versions that only expose /users/logs.
         response = await dio.get(
-          _usersEndpoint('logs/role-scoped'),
+          _usersEndpoint('logs'),
           queryParameters: {'limit': limit},
           options: _authorizedOptions(accessToken),
         );
-        _validateStatusCode(response.statusCode, 'Failed to load audit logs.');
-      } on DioException catch (error) {
-        // Backward compatibility for older backend versions that only expose /users/logs.
-        if (error.response?.statusCode == 404) {
-          response = await dio.get(
-            _usersEndpoint('logs'),
-            queryParameters: {'limit': limit},
-            options: _authorizedOptions(accessToken),
-          );
-          _validateStatusCode(
-            response.statusCode,
-            'Failed to load audit logs.',
-          );
-        } else {
-          rethrow;
-        }
       }
+      _validateStatusCode(response, 'Failed to load audit logs.');
 
       final payload = _readPayload(response.data);
       final logsValue = payload['logs'];
@@ -108,7 +98,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         queryParameters: {'limit': limit},
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to load users.');
+      _validateStatusCode(response, 'Failed to load users.');
 
       final payload = _readPayload(response.data);
       final rawUsers = payload['users'];
@@ -138,7 +128,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         _usersEndpoint('roles'),
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to load roles.');
+      _validateStatusCode(response, 'Failed to load roles.');
 
       final payload = _readPayload(response.data);
       final rawRoles = payload['roles'];
@@ -189,7 +179,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         data: body,
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to create user.');
+      _validateStatusCode(response, 'Failed to create user.');
 
       final payload = _readPayload(response.data);
       final rawUser = payload['user'];
@@ -232,7 +222,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         data: body,
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to update user.');
+      _validateStatusCode(response, 'Failed to update user.');
       return true;
     } on DioException catch (error) {
       throw ServerException(
@@ -253,7 +243,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         _usersEndpoint(userId),
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to delete user.');
+      _validateStatusCode(response, 'Failed to delete user.');
       return true;
     } on DioException catch (error) {
       throw ServerException(
@@ -276,7 +266,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         data: {'role': role},
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to update role.');
+      _validateStatusCode(response, 'Failed to update role.');
       return true;
     } on DioException catch (error) {
       throw ServerException(
@@ -297,7 +287,7 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
         _usersEndpoint('$userId/password/reset'),
         options: _authorizedOptions(accessToken),
       );
-      _validateStatusCode(response.statusCode, 'Failed to reset password.');
+      _validateStatusCode(response, 'Failed to reset password.');
       final payload = _readPayload(response.data);
       return payload['defaultPassword']?.toString();
     } on DioException catch (error) {
@@ -309,33 +299,16 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
     }
   }
 
-  @override
-  Future<bool> exchangeIdToken({required String idToken}) async {
-    try {
-      final response = await dio.post(
-        _authEndpoint('exchange'),
-        data: {'idToken': idToken},
-      );
-      _validateStatusCode(response.statusCode, 'Failed to sync session.');
-      return true;
-    } on DioException catch (error) {
-      throw ServerException(
-        _dioErrorMessage(error, fallback: 'Failed to sync session.'),
-      );
-    } catch (error) {
-      throw ServerException(error.toString());
-    }
-  }
-
   Options _authorizedOptions(String accessToken) {
-    return Options(headers: {'Authorization': 'Bearer $accessToken'});
+    return Options(
+      headers: {'Authorization': 'Bearer $accessToken'},
+      validateStatus: (_) => true,
+    );
   }
 
   String _usersEndpoint(String path) {
     final base = _serviceBaseUrl();
-    final trimmed = base.endsWith('/')
-        ? base.substring(0, base.length - 1)
-        : base;
+    final trimmed = _trimTrailingSlash(base);
     final normalizedPath = path.trim();
     if (trimmed.endsWith('/users')) {
       if (normalizedPath.isEmpty) return trimmed;
@@ -345,30 +318,37 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
     return '$trimmed/users/$normalizedPath';
   }
 
-  String _authEndpoint(String path) {
-    final base = _serviceBaseUrl();
-    final trimmed = base.endsWith('/')
-        ? base.substring(0, base.length - 1)
-        : base;
-    if (trimmed.endsWith('/auth')) {
-      return '$trimmed/$path';
+  String _serviceBaseUrl() {
+    var base = _trimTrailingSlash(authServerBaseUrl.trim());
+    final suffixes = <String>[
+      '/api/auth',
+      '/v1/auth',
+      '/auth',
+      '/users',
+      '/api',
+      '/v1',
+    ];
+
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final suffix in suffixes) {
+        if (base.endsWith(suffix) && base.length > suffix.length) {
+          base = base.substring(0, base.length - suffix.length);
+          changed = true;
+          break;
+        }
+      }
     }
-    return '$trimmed/auth/$path';
+
+    return _trimTrailingSlash(base);
   }
 
-  String _serviceBaseUrl() {
-    var base = authServerBaseUrl.trim();
-    if (base.endsWith('/')) {
-      base = base.substring(0, base.length - 1);
+  String _trimTrailingSlash(String value) {
+    if (value.endsWith('/')) {
+      return value.substring(0, value.length - 1);
     }
-
-    if (base.endsWith('/auth')) {
-      return base.substring(0, base.length - '/auth'.length);
-    }
-    if (base.endsWith('/users')) {
-      return base.substring(0, base.length - '/users'.length);
-    }
-    return base;
+    return value;
   }
 
   Map<String, dynamic> _readPayload(dynamic data) {
@@ -383,19 +363,28 @@ class UserAccessRemoteDataSourceImpl implements UserAccessRemoteDataSource {
   }
 
   String _dioErrorMessage(DioException error, {required String fallback}) {
-    final data = error.response?.data;
+    return _extractErrorMessage(
+      error.response?.data,
+      fallback: error.message ?? fallback,
+    );
+  }
+
+  void _validateStatusCode(Response<dynamic> response, String message) {
+    final statusCode = response.statusCode;
+    if (statusCode == null || statusCode < 200 || statusCode >= 300) {
+      throw ServerException(
+        _extractErrorMessage(response.data, fallback: message),
+      );
+    }
+  }
+
+  String _extractErrorMessage(dynamic data, {required String fallback}) {
     if (data is Map) {
       final message = data['error'] ?? data['message'];
       if (message != null) {
         return message.toString();
       }
     }
-    return error.message ?? fallback;
-  }
-
-  void _validateStatusCode(int? statusCode, String message) {
-    if (statusCode == null || statusCode < 200 || statusCode >= 300) {
-      throw ServerException(message);
-    }
+    return fallback;
   }
 }

@@ -69,51 +69,67 @@ class AuthBloc extends Bloc<AuthEvent, AuthState> {
        _revokeRefreshToken = revokeRefreshTokenUseCase,
        super(AuthInitial()) {
     on<AuthSignIn>((event, emit) async {
-      emit(AuthLoading());
-      final response = await _login(
-        LoginParams(email: event.email, password: event.password),
-      );
-      await response.fold(
-        (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthAuthenticated(session)),
-      );
+      try {
+        emit(AuthLoading());
+        final response = await _login(
+          LoginParams(email: event.email, password: event.password),
+        );
+        await response.fold(
+          (failure) async => emit(AuthFailure(failure.message)),
+          (session) async => emit(AuthAuthenticated(session)),
+        );
+      } catch (error) {
+        emit(AuthFailure(error.toString()));
+      }
     });
 
     on<AuthSignUp>((event, emit) async {
-      emit(AuthLoading());
-      final response = await _signup(
-        SignUpParams(
-          name: event.name,
-          email: event.email,
-          password: event.password,
-        ),
-      );
-      await response.fold(
-        (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthAuthenticated(session)),
-      );
+      try {
+        emit(AuthLoading());
+        final response = await _signup(
+          SignUpParams(
+            name: event.name,
+            email: event.email,
+            password: event.password,
+          ),
+        );
+        await response.fold(
+          (failure) async => emit(AuthFailure(failure.message)),
+          (session) async => emit(AuthAuthenticated(session)),
+        );
+      } catch (error) {
+        emit(AuthFailure(error.toString()));
+      }
     });
 
     on<AuthRefreshSession>((event, emit) async {
-      emit(AuthLoading());
-      final response = await _refreshSession(
-        RefreshSessionParams(refreshToken: event.refreshToken),
-      );
-      await response.fold(
-        (failure) async => emit(AuthFailure(failure.message)),
-        (session) async => emit(AuthAuthenticated(session)),
-      );
+      try {
+        emit(AuthLoading());
+        final response = await _refreshSession(
+          RefreshSessionParams(refreshToken: event.refreshToken),
+        );
+        await response.fold(
+          (failure) async => emit(AuthFailure(failure.message)),
+          (session) async => emit(AuthAuthenticated(session)),
+        );
+      } catch (error) {
+        emit(AuthFailure(error.toString()));
+      }
     });
 
     on<AuthRevokeSession>((event, emit) async {
-      emit(AuthLoading());
-      final response = await _revokeRefreshToken(
-        RevokeRefreshTokenParams(refreshToken: event.refreshToken),
-      );
-      await response.fold(
-        (failure) async => emit(AuthFailure(failure.message)),
-        (_) async => emit(AuthInitial()),
-      );
+      try {
+        emit(AuthLoading());
+        final response = await _revokeRefreshToken(
+          RevokeRefreshTokenParams(refreshToken: event.refreshToken),
+        );
+        await response.fold(
+          (failure) async => emit(AuthFailure(failure.message)),
+          (_) async => emit(AuthInitial()),
+        );
+      } catch (error) {
+        emit(AuthFailure(error.toString()));
+      }
     });
   }
 }

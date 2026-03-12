@@ -7,31 +7,24 @@ Node.js auth backend for the Flutter `access_app` project.
 - Express API
 - PostgreSQL for persistent user/token storage
 - Redis for cache and refresh-session lookup
-- Firebase Admin SDK for `idToken` verification
+- JWT access + refresh tokens
 
 ## API used by Flutter
 
-- `POST /auth/exchange` with `{ "idToken": "..." }`
+- `POST /auth/signup` with `{ "name", "email", "password" }`
+- `POST /auth/login` with `{ "email", "password" }`
 - `POST /auth/refresh` with `{ "refreshToken": "..." }`
 - `POST /auth/revoke` with `{ "refreshToken": "..." }`
+- `PATCH /auth/change-password` with `{ "currentPassword", "newPassword" }`
+- `GET /users/logs/role-scoped` for role-based log visibility
 
 ## Docker Setup
 
-1. Put Firebase service account JSON at:
-   `secrets/firebase-service-account.json`
-   Optional: if you skip this file, backend still starts and verifies Firebase
-   ID token signatures, but token revocation checks are disabled.
-2. Optional: edit `.env.docker` token secrets.
-3. Start stack:
+1. Optional: edit `.env.docker` token secrets.
+2. Start stack:
 
 ```bash
 docker compose up --build
-```
-
-If using service account file with Docker, add this to `.env.docker`:
-
-```bash
-GOOGLE_APPLICATION_CREDENTIALS=/app/secrets/firebase-service-account.json
 ```
 
 Backend will be on `http://localhost:3000`.

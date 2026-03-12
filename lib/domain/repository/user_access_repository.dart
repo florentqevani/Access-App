@@ -52,6 +52,4 @@ abstract interface class UserAccessRepository {
     required String accessToken,
     required String userId,
   });
-
-  Future<Either<Failure, bool>> exchangeIdToken({required String idToken});
 }

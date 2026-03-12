@@ -48,6 +48,4 @@ abstract interface class UserAccessRemoteDataSource {
     required String accessToken,
     required String userId,
   });
-
-  Future<bool> exchangeIdToken({required String idToken});
 }

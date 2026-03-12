@@ -5,7 +5,6 @@ import authRoutes from "./routes/auth_routes.js";
 import userRoutes from "./routes/users_route.js";
 import { initPostgres } from "./config/postgres.js";
 import { initRedis, redisClient } from "./config/redis.js";
-import { initFirebaseAdmin } from "./config/firebase.js";
 import { runMigrations } from "./db/migrate.js";
 import { db } from "./data/store.js";
 
@@ -30,14 +29,18 @@ app.get("/health", async (req, res) => {
   }
 });
 
+app.use("/", authRoutes);
 app.use("/auth", authRoutes);
+app.use("/api", authRoutes);
+app.use("/api/auth", authRoutes);
+app.use("/v1", authRoutes);
+app.use("/v1/auth", authRoutes);
 app.use("/users", userRoutes);
 
 async function bootstrap() {
   await initPostgres();
   await runMigrations();
   await initRedis();
-  initFirebaseAdmin();
 
   app.listen(port, () => {
     console.log(`Server is running on http://localhost:${port}`);

@@ -11,25 +11,12 @@ import 'package:access_app/domain/use_cases/signup_use_case.dart';
 import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
 import 'package:access_app/presentation/bloc/auth_bloc.dart';
 import 'package:access_app/presentation/pages/login_page.dart';
-import 'package:access_app/firebase_options.dart';
 import 'package:dio/dio.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-
-  try {
-    await Firebase.initializeApp(
-      options: DefaultFirebaseOptions.currentPlatform,
-    );
-  } catch (e) {
-    runApp(FirebaseErrorApp(error: e.toString()));
-    return;
-  }
-
   runApp(const MyApp());
 }
 
@@ -38,7 +25,6 @@ class MyApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final firebaseAuth = FirebaseAuth.instance;
     final dio = Dio();
     const configuredAuthServerBaseUrl = String.fromEnvironment(
       'AUTH_SERVER_BASE_URL',
@@ -47,7 +33,6 @@ class MyApp extends StatelessWidget {
       configuredBaseUrl: configuredAuthServerBaseUrl,
     );
     final remoteDataSource = RemoteDataSourceImpl(
-      firebaseAuth: firebaseAuth,
       authServerBaseUrl: authServerBaseUrl,
       dio: dio,
     );
@@ -93,9 +78,6 @@ class MyApp extends StatelessWidget {
         RepositoryProvider<ResetUserPasswordUseCase>(
           create: (_) => ResetUserPasswordUseCase(userAccessRepository),
         ),
-        RepositoryProvider<ExchangeIdTokenUseCase>(
-          create: (_) => ExchangeIdTokenUseCase(userAccessRepository),
-        ),
       ],
       child: BlocProvider(
         create: (context) => AuthBloc(
@@ -109,41 +91,6 @@ class MyApp extends StatelessWidget {
           title: 'Access App',
           theme: AppTheme.darkMode,
           home: const LoginPage(),
-        ),
-      ),
-    );
-  }
-}
-
-class FirebaseErrorApp extends StatelessWidget {
-  final String error;
-
-  const FirebaseErrorApp({super.key, required this.error});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Firebase Setup Required',
-      home: Scaffold(
-        body: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Text(
-                  'Firebase is not initialized',
-                  style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 12),
-                const Text(
-                  'Add Firebase platform config files and run flutterfire configure.',
-                ),
-                const SizedBox(height: 24),
-                Text(error, textAlign: TextAlign.center),
-              ],
-            ),
-          ),
         ),
       ),
     );

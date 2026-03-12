@@ -59,9 +59,8 @@ class _LogsPageState extends State<LogsPage> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      _canViewAllLogs
-                          ? 'Showing all logs (admin visibility).'
-                          : 'Showing only your logs (manager visibility).',
+                      'Audit Logs',
+                      style: Theme.of(context).textTheme.headlineSmall,
                     ),
                     if (_isLoading) ...[
                       const SizedBox(height: 12),

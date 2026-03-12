@@ -6,37 +6,33 @@ import 'package:access_app/data/data_source/remote_data_source.dart';
 import 'package:access_app/domain/repository/auth_session.dart';
 import 'package:access_app/domain/repository/auth_user.dart';
 import 'package:dio/dio.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 
 class RemoteDataSourceImpl implements RemoteDataSource {
-  final FirebaseAuth firebaseAuth;
   final String authServerBaseUrl;
   final Dio dio;
 
-  RemoteDataSourceImpl({
-    required this.firebaseAuth,
-    required String authServerBaseUrl,
-    required this.dio,
-  }) : authServerBaseUrl = normalizeAuthServerBaseUrl(authServerBaseUrl);
+  RemoteDataSourceImpl({required String authServerBaseUrl, required this.dio})
+    : authServerBaseUrl = normalizeAuthServerBaseUrl(authServerBaseUrl);
   @override
   Future<AuthSession> loginWithEmail({
     required String email,
     required String password,
   }) async {
     try {
-      final response = await firebaseAuth.signInWithEmailAndPassword(
-        email: email,
-        password: password,
+      final response = await _postAuthWithFallback(
+        primaryPath: 'login',
+        fallbackPaths: const ['signin', 'sign-in'],
+        data: {'email': email, 'password': password},
       );
-      final user = response.user;
-
-      if (user == null) {
-        throw const ServerException('User is null');
-      }
-
-      return _exchangeFirebaseSession(user);
+      _validateStatusCode(response, 'Failed to login.');
+      return _toAuthSession(_readPayload(response.data));
     } on ServerException {
       rethrow;
+    } on DioException catch (e) {
+      if (_isConnectionError(e.type)) {
+        throw _serverNotReachable();
+      }
+      throw ServerException(_dioErrorMessage(e, fallback: 'Failed to login.'));
     } catch (e) {
       throw ServerException(e.toString());
     }
@@ -49,24 +45,22 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     required String password,
   }) async {
     try {
-      final response = await firebaseAuth.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
+      final response = await _postAuthWithFallback(
+        primaryPath: 'signup',
+        fallbackPaths: const ['register', 'sign-up'],
+        data: {'name': name, 'email': email, 'password': password},
       );
-
-      final user = response.user;
-      if (user == null) {
-        throw const ServerException('User is null');
-      }
-
-      if (name.trim().isNotEmpty) {
-        await user.updateDisplayName(name.trim());
-        await user.reload();
-      }
-
-      return _exchangeFirebaseSession(user);
+      _validateStatusCode(response, 'Failed to sign up.');
+      return _toAuthSession(_readPayload(response.data));
     } on ServerException {
       rethrow;
+    } on DioException catch (e) {
+      if (_isConnectionError(e.type)) {
+        throw _serverNotReachable();
+      }
+      throw ServerException(
+        _dioErrorMessage(e, fallback: 'Failed to sign up.'),
+      );
     } catch (e) {
       throw ServerException(e.toString());
     }
@@ -75,12 +69,13 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   @override
   Future<AuthSession> refreshSession({required String refreshToken}) async {
     try {
-      final response = await dio.post(
-        _authEndpoint('refresh'),
+      final response = await _postAuthWithFallback(
+        primaryPath: 'refresh',
+        fallbackPaths: const [],
         data: {'refreshToken': refreshToken},
       );
 
-      _validateStatusCode(response.statusCode, 'Failed to refresh session.');
+      _validateStatusCode(response, 'Failed to refresh session.');
       return _toAuthSession(_readPayload(response.data));
     } on DioException catch (e) {
       if (_isConnectionError(e.type)) {
@@ -95,15 +90,13 @@ class RemoteDataSourceImpl implements RemoteDataSource {
   @override
   Future<bool> revokeRefreshToken({required String refreshToken}) async {
     try {
-      final response = await dio.post(
-        _authEndpoint('revoke'),
+      final response = await _postAuthWithFallback(
+        primaryPath: 'revoke',
+        fallbackPaths: const [],
         data: {'refreshToken': refreshToken},
       );
 
-      _validateStatusCode(
-        response.statusCode,
-        'Failed to revoke refresh token.',
-      );
+      _validateStatusCode(response, 'Failed to revoke refresh token.');
       final payload = _readPayload(response.data);
       final revoked = payload['revoked'];
 
@@ -117,33 +110,6 @@ class RemoteDataSourceImpl implements RemoteDataSource {
         throw _serverNotReachable();
       }
       throw ServerException(e.message ?? 'Failed to revoke refresh token.');
-    } catch (e) {
-      throw ServerException(e.toString());
-    }
-  }
-
-  Future<AuthSession> _exchangeFirebaseSession(User user) async {
-    final idToken = await user.getIdToken(true);
-    if (idToken == null || idToken.isEmpty) {
-      throw const ServerException('Unable to read Firebase ID token.');
-    }
-
-    try {
-      final response = await dio.post(
-        _authEndpoint('exchange'),
-        data: {'idToken': idToken},
-      );
-
-      _validateStatusCode(
-        response.statusCode,
-        'Failed to exchange Firebase token.',
-      );
-      return _toAuthSession(_readPayload(response.data));
-    } on DioException catch (e) {
-      if (_isConnectionError(e.type)) {
-        throw _serverNotReachable();
-      }
-      throw ServerException(e.message ?? 'Failed to exchange Firebase token.');
     } catch (e) {
       throw ServerException(e.toString());
     }
@@ -315,9 +281,12 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     return null;
   }
 
-  void _validateStatusCode(int? statusCode, String message) {
+  void _validateStatusCode(Response<dynamic> response, String fallback) {
+    final statusCode = response.statusCode;
     if (statusCode == null || statusCode < 200 || statusCode >= 300) {
-      throw ServerException(message);
+      throw ServerException(
+        _extractErrorMessage(response.data, fallback: fallback),
+      );
     }
   }
 
@@ -328,14 +297,102 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     );
   }
 
-  String _authEndpoint(String path) {
-    final trimmed = authServerBaseUrl.endsWith('/')
-        ? authServerBaseUrl.substring(0, authServerBaseUrl.length - 1)
-        : authServerBaseUrl;
-    if (trimmed.endsWith('/auth')) {
-      return '$trimmed/$path';
+  String _serviceBaseUrl() {
+    var base = _trimTrailingSlash(authServerBaseUrl.trim());
+    final suffixes = <String>[
+      '/api/auth',
+      '/v1/auth',
+      '/auth',
+      '/users',
+      '/api',
+      '/v1',
+    ];
+
+    var changed = true;
+    while (changed) {
+      changed = false;
+      for (final suffix in suffixes) {
+        if (base.endsWith(suffix) && base.length > suffix.length) {
+          base = base.substring(0, base.length - suffix.length);
+          changed = true;
+          break;
+        }
+      }
     }
-    return '$trimmed/auth/$path';
+
+    return _trimTrailingSlash(base);
+  }
+
+  String _dioErrorMessage(DioException error, {required String fallback}) {
+    return _extractErrorMessage(
+      error.response?.data,
+      fallback: error.message ?? fallback,
+    );
+  }
+
+  Future<Response<dynamic>> _postAuthWithFallback({
+    required String primaryPath,
+    required List<String> fallbackPaths,
+    required Map<String, dynamic> data,
+  }) async {
+    Response<dynamic>? last404Response;
+    final pathCandidates = [primaryPath, ...fallbackPaths];
+    for (final path in pathCandidates) {
+      for (final endpoint in _authEndpointCandidates(path)) {
+        try {
+          final response = await dio.post(
+            endpoint,
+            data: data,
+            options: Options(validateStatus: (_) => true),
+          );
+          if (response.statusCode == 404) {
+            last404Response = response;
+            continue;
+          }
+          return response;
+        } on DioException catch (error) {
+          if (_isConnectionError(error.type)) {
+            rethrow;
+          }
+          rethrow;
+        }
+      }
+    }
+
+    if (last404Response != null) {
+      return last404Response;
+    }
+
+    throw const ServerException('Authentication endpoint not found.');
+  }
+
+  List<String> _authEndpointCandidates(String path) {
+    final normalizedPath = path.trim().replaceAll(RegExp(r'^/+'), '');
+    final bases = <String>{
+      _trimTrailingSlash(authServerBaseUrl.trim()),
+      _serviceBaseUrl(),
+    };
+
+    final endpoints = <String>{};
+    for (final base in bases) {
+      if (base.isEmpty) {
+        continue;
+      }
+      final trimmed = _trimTrailingSlash(base);
+      endpoints.add('$trimmed/$normalizedPath');
+      endpoints.add('$trimmed/auth/$normalizedPath');
+      endpoints.add('$trimmed/api/auth/$normalizedPath');
+      endpoints.add('$trimmed/v1/auth/$normalizedPath');
+    }
+
+    return endpoints.toList(growable: false);
+  }
+
+  String _trimTrailingSlash(String value) {
+    if (value.endsWith('/')) {
+      return value.substring(0, value.length - 1);
+    }
+    return value;
   }
 
   bool _isConnectionError(DioExceptionType type) {
@@ -352,4 +409,13 @@ class RemoteDataSourceImpl implements RemoteDataSource {
     }
   }
 
+  String _extractErrorMessage(dynamic data, {required String fallback}) {
+    if (data is Map) {
+      final message = data['error'] ?? data['message'];
+      if (message != null) {
+        return message.toString();
+      }
+    }
+    return fallback;
+  }
 }

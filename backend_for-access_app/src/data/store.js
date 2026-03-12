@@ -15,7 +15,6 @@ const roleIdByNameCache = new Map();
 const USER_SELECT_WITH_ROLE_AND_PERMISSIONS = `
   SELECT
     u.id,
-    u.firebase_uid,
     u.email,
     u.display_name,
     u.created_at,
@@ -49,7 +48,6 @@ function toUser(row) {
 
   return {
     id: row.id,
-    firebaseUid: row.firebase_uid,
     email: row.email,
     displayName: row.display_name,
     roleId: row.role_id,
@@ -120,33 +118,105 @@ async function cacheUser(user) {
 }
 
 export const db = {
-  async upsertFirebaseUser({ firebaseUid, email, displayName }) {
-    const id = uuidv4();
-    const defaultRoleId = await getRoleIdByName(ROLE_NAMES.USER);
-    if (!defaultRoleId) {
-      throw new Error("Default role 'user' was not found in database.");
+  async findUserByEmail(email) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
+    }
+
+    return findUserByClause("WHERE lower(u.email) = $1", [normalizedEmail]);
+  },
+
+  async findUserCredentialsByEmail(email) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      return null;
     }
 
     const result = await pgPool.query(
       `
-      INSERT INTO users (id, firebase_uid, email, display_name, role_id)
-      VALUES ($1, $2, $3, $4, $5)
-      ON CONFLICT (firebase_uid)
-      DO UPDATE SET
-        email = EXCLUDED.email,
-        display_name = EXCLUDED.display_name,
-        role_id = COALESCE(users.role_id, EXCLUDED.role_id),
-        updated_at = NOW()
-      RETURNING id;
+      SELECT id, password_hash
+      FROM users
+      WHERE lower(email) = $1
+      LIMIT 1;
       `,
-      [id, firebaseUid, email ?? null, displayName ?? null, defaultRoleId],
+      [normalizedEmail],
     );
 
-    const userId = result.rows[0]?.id;
-    if (!userId) return null;
+    if (result.rows.length === 0) {
+      return null;
+    }
 
-    await redisClient.del(userCacheKey(userId));
-    const user = await findUserByClause("WHERE u.id = $1", [userId]);
+    return {
+      userId: result.rows[0].id,
+      passwordHash: result.rows[0].password_hash,
+    };
+  },
+
+  async getUserPasswordHash(userId) {
+    const result = await pgPool.query(
+      `
+      SELECT password_hash
+      FROM users
+      WHERE id = $1
+      LIMIT 1;
+      `,
+      [userId],
+    );
+
+    if (result.rows.length === 0) {
+      return null;
+    }
+    return result.rows[0].password_hash;
+  },
+
+  async updateUserPasswordHash({ userId, passwordHash }) {
+    const result = await pgPool.query(
+      `
+      UPDATE users
+      SET password_hash = $1, updated_at = NOW()
+      WHERE id = $2
+      RETURNING id;
+      `,
+      [passwordHash, userId],
+    );
+
+    return result.rows.length > 0;
+  },
+
+  async createUserWithPassword({
+    email,
+    displayName,
+    passwordHash,
+    roleName = ROLE_NAMES.USER,
+  }) {
+    const normalizedEmail = String(email || "").trim().toLowerCase();
+    if (!normalizedEmail) {
+      throw new Error("Email is required.");
+    }
+
+    const roleId = await getRoleIdByName(roleName);
+    if (!roleId) {
+      throw new Error(`Role '${roleName}' was not found in database.`);
+    }
+
+    const userId = uuidv4();
+    const result = await pgPool.query(
+      `
+      INSERT INTO users (id, email, display_name, password_hash, role_id)
+      VALUES ($1, $2, $3, $4, $5)
+      RETURNING id;
+      `,
+      [userId, normalizedEmail, displayName ?? null, passwordHash, roleId],
+    );
+
+    const createdId = result.rows[0]?.id;
+    if (!createdId) {
+      return null;
+    }
+
+    await redisClient.del(userCacheKey(createdId));
+    const user = await findUserByClause("WHERE u.id = $1", [createdId]);
     await cacheUser(user);
     return user;
   },
@@ -160,10 +230,6 @@ export const db = {
     const user = await findUserByClause("WHERE u.id = $1", [id]);
     await cacheUser(user);
     return user;
-  },
-
-  async findUserByFirebaseUid(firebaseUid) {
-    return findUserByClause("WHERE u.firebase_uid = $1", [firebaseUid]);
   },
 
   async listUsers({ viewerUserId, includeAll = false, limit = 100 }) {

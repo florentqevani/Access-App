@@ -47,9 +47,9 @@ export async function runMigrations() {
     await client.query(`
       CREATE TABLE IF NOT EXISTS users (
         id UUID PRIMARY KEY,
-        firebase_uid TEXT NOT NULL UNIQUE,
         email TEXT,
         display_name TEXT,
+        password_hash TEXT,
         role_id UUID,
         created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
         updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -59,6 +59,22 @@ export async function runMigrations() {
     await client.query(`
       ALTER TABLE users
       ADD COLUMN IF NOT EXISTS role_id UUID;
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      ADD COLUMN IF NOT EXISTS password_hash TEXT;
+    `);
+
+    await client.query(`
+      ALTER TABLE users
+      DROP COLUMN IF EXISTS firebase_uid;
+    `);
+
+    await client.query(`
+      CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_lower_unique
+        ON users (LOWER(email))
+        WHERE email IS NOT NULL;
     `);
 
     await seedRolesAndPermissions(client);

@@ -37,8 +37,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
   Widget build(BuildContext context) {
     final user = widget.session.user;
     final canRead = user.hasPermission('users', 'read');
-    final canOpenManagement =
-        canRead ||
+    final canManageUsers =
         user.hasPermission('users', 'create') ||
         user.hasPermission('users', 'edit') ||
         user.hasPermission('users', 'delete') ||
@@ -48,7 +47,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
       appBar: AppBar(
         title: const Text('Users Dashboard'),
         actions: [
-          if (canOpenManagement)
+          if (canManageUsers)
             IconButton(
               onPressed: () {
                 Navigator.push(
@@ -84,9 +83,9 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
                   ),
                 )
               else
-                _buildUsersCard(canOpenManagement: canOpenManagement),
-              if (canOpenManagement) const SizedBox(height: 12),
-              if (canOpenManagement)
+                _buildUsersCard(canManageUsers: canManageUsers),
+              if (canManageUsers) const SizedBox(height: 12),
+              if (canManageUsers)
                 SizedBox(
                   width: double.infinity,
                   child: ElevatedButton.icon(
@@ -100,7 +99,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
                       );
                     },
                     icon: const Icon(Icons.manage_accounts_outlined),
-                    label: const Text('Open CRUD & Role Management'),
+                    label: const Text('Open User Management'),
                   ),
                 ),
             ],
@@ -110,7 +109,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
     );
   }
 
-  Widget _buildUsersCard({required bool canOpenManagement}) {
+  Widget _buildUsersCard({required bool canManageUsers}) {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -159,7 +158,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
                     return ListTile(
                       dense: true,
                       contentPadding: EdgeInsets.zero,
-                      onTap: canOpenManagement
+                      onTap: canManageUsers
                           ? () => _openUserManagement(prefillUser: row)
                           : null,
                       title: Text(row.displayName ?? row.email ?? '(no name)'),

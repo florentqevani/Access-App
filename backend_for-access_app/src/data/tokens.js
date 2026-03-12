@@ -17,7 +17,6 @@ export function issueAccessToken(user) {
       permissions: Array.isArray(user.permissionCodes)
         ? user.permissionCodes
         : [],
-      firebaseUid: user.firebaseUid,
       type: "access",
     },
     ACCESS_TOKEN_SECRET,

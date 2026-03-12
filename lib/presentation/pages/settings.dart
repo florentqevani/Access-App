@@ -1,6 +1,8 @@
+import 'package:access_app/core/network/auth_server_config.dart';
 import 'package:access_app/domain/repository/auth_session.dart';
 import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:access_app/presentation/pages/login_page.dart';
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_bloc/flutter_bloc.dart';
 
@@ -31,6 +33,7 @@ class UserSettingsPage extends StatefulWidget {
 }
 
 class _UserSettingsPageState extends State<UserSettingsPage> {
+  final Dio _dio = Dio();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _currentPasswordController =
       TextEditingController();
@@ -40,8 +43,16 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
 
   bool _isSavingUsername = false;
   bool _isChangingPassword = false;
-  bool _isSendingPasswordResetEmail = false;
   String? _liveDisplayName;
+
+  String get _authServerBaseUrl {
+    const configuredAuthServerBaseUrl = String.fromEnvironment(
+      'AUTH_SERVER_BASE_URL',
+    );
+    return resolveAuthServerBaseUrl(
+      configuredBaseUrl: configuredAuthServerBaseUrl,
+    );
+  }
 
   @override
   void initState() {
@@ -171,7 +182,6 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
               obscureText: true,
               decoration: const InputDecoration(
                 labelText: 'Current Password',
-                hintText: 'Needed for re-auth in most cases',
                 border: OutlineInputBorder(),
               ),
             ),
@@ -203,20 +213,6 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                 ),
               ),
             ),
-            const SizedBox(height: 8),
-            SizedBox(
-              width: double.infinity,
-              child: OutlinedButton(
-                onPressed: _isSendingPasswordResetEmail
-                    ? null
-                    : _sendPasswordResetEmail,
-                child: Text(
-                  _isSendingPasswordResetEmail
-                      ? 'Sending...'
-                      : 'Send Password Reset Email',
-                ),
-              ),
-            ),
           ],
         ),
       ),
@@ -224,7 +220,6 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
   }
 
   Future<void> _changeUsername() async {
-    final exchangeIdTokenUseCase = context.read<ExchangeIdTokenUseCase>();
     final newName = _usernameController.text.trim();
     if (newName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -238,30 +233,15 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     });
 
     try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser == null) {
-        throw FirebaseAuthException(
-          code: 'no-current-user',
-          message: 'No active Firebase user.',
-        );
-      }
+      final response = await _dio.patch(
+        _usersEndpoint('me/profile'),
+        data: {'displayName': newName},
+        options: _authorizedOptions(),
+      );
 
-      await firebaseUser.updateDisplayName(newName);
-      await firebaseUser.reload();
-
-      String? backendSyncError;
-      final refreshedUser = FirebaseAuth.instance.currentUser;
-      final idToken = await refreshedUser?.getIdToken(true);
-      if (idToken != null && idToken.isNotEmpty) {
-        final syncResponse = await exchangeIdTokenUseCase(
-          ExchangeIdTokenParams(idToken: idToken),
-        );
-
-        syncResponse.fold(
-          (failure) => backendSyncError = failure.message,
-          (_) => backendSyncError = null,
-        );
-      }
+      final payload = _readPayload(response.data);
+      final message =
+          payload['message']?.toString() ?? 'Username updated successfully.';
 
       setState(() {
         _liveDisplayName = newName;
@@ -272,19 +252,17 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
         return;
       }
 
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    } on DioException catch (error) {
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            backendSyncError == null
-                ? 'Username updated successfully.'
-                : 'Username updated in Firebase, but backend sync failed: $backendSyncError',
+            _dioErrorMessage(error, fallback: 'Failed to update username.'),
           ),
         ),
-      );
-    } on FirebaseAuthException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(error.message ?? 'Failed to update username.')),
       );
     } catch (_) {
       if (!mounted) return;
@@ -304,6 +282,13 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     final currentPassword = _currentPasswordController.text.trim();
     final newPassword = _newPasswordController.text.trim();
     final confirmPassword = _confirmPasswordController.text.trim();
+
+    if (currentPassword.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Current password is required.')),
+      );
+      return;
+    }
 
     if (newPassword.length < 6) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -326,53 +311,40 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     });
 
     try {
-      final firebaseUser = FirebaseAuth.instance.currentUser;
-      if (firebaseUser == null) {
-        throw FirebaseAuthException(
-          code: 'no-current-user',
-          message: 'No active Firebase user.',
-        );
-      }
-
-      final hasPasswordProvider = firebaseUser.providerData.any(
-        (provider) => provider.providerId == 'password',
+      final response = await _dio.patch(
+        _authEndpoint('change-password'),
+        data: {'currentPassword': currentPassword, 'newPassword': newPassword},
+        options: _authorizedOptions(),
       );
 
-      if (hasPasswordProvider && currentPassword.isEmpty) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'Current password is required to change your password.',
-            ),
-          ),
-        );
-        return;
-      }
+      final payload = _readPayload(response.data);
+      final message =
+          payload['message']?.toString() ??
+          'Password updated successfully. Please sign in again.';
 
-      if (hasPasswordProvider && firebaseUser.email != null) {
-        final credential = EmailAuthProvider.credential(
-          email: firebaseUser.email!,
-          password: currentPassword,
-        );
-        await firebaseUser.reauthenticateWithCredential(credential);
-      }
-
-      await firebaseUser.updatePassword(newPassword);
       _currentPasswordController.clear();
       _newPasswordController.clear();
       _confirmPasswordController.clear();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password updated successfully.')),
-      );
-    } on FirebaseAuthException catch (error) {
-      if (!mounted) return;
-      final message = _firebasePasswordErrorMessage(error);
       ScaffoldMessenger.of(
         context,
       ).showSnackBar(SnackBar(content: Text(message)));
+
+      Navigator.pushAndRemoveUntil(
+        context,
+        LoginPage.route(),
+        (route) => false,
+      );
+    } on DioException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _dioErrorMessage(error, fallback: 'Failed to update password.'),
+          ),
+        ),
+      );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -382,51 +354,6 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
       if (mounted) {
         setState(() {
           _isChangingPassword = false;
-        });
-      }
-    }
-  }
-
-  Future<void> _sendPasswordResetEmail() async {
-    final firebaseUser = FirebaseAuth.instance.currentUser;
-    final email = firebaseUser?.email?.trim();
-    if (email == null || email.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No email is available for password reset.'),
-        ),
-      );
-      return;
-    }
-
-    setState(() {
-      _isSendingPasswordResetEmail = true;
-    });
-
-    try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Password reset email sent to $email.')),
-      );
-    } on FirebaseAuthException catch (error) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            error.message ?? 'Failed to send password reset email.',
-          ),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Failed to send password reset email.')),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isSendingPasswordResetEmail = false;
         });
       }
     }
@@ -459,17 +386,75 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     );
   }
 
-  String _firebasePasswordErrorMessage(FirebaseAuthException error) {
-    switch (error.code) {
-      case 'requires-recent-login':
-        return 'Please re-login (or enter current password) before changing password.';
-      case 'wrong-password':
-      case 'invalid-credential':
-        return 'Current password is incorrect.';
-      case 'weak-password':
-        return 'New password is too weak.';
-      default:
-        return error.message ?? 'Failed to update password.';
+  Options _authorizedOptions() {
+    return Options(
+      headers: {'Authorization': 'Bearer ${widget.session.accessToken}'},
+    );
+  }
+
+  String _authEndpoint(String path) {
+    final base = _serviceBaseUrl();
+    final trimmed = base.endsWith('/')
+        ? base.substring(0, base.length - 1)
+        : base;
+    if (trimmed.endsWith('/auth')) {
+      return '$trimmed/$path';
     }
+    return '$trimmed/auth/$path';
+  }
+
+  String _usersEndpoint(String path) {
+    final base = _serviceBaseUrl();
+    final trimmed = base.endsWith('/')
+        ? base.substring(0, base.length - 1)
+        : base;
+
+    final normalizedPath = path.trim();
+    if (trimmed.endsWith('/users')) {
+      if (normalizedPath.isEmpty) return trimmed;
+      return '$trimmed/$normalizedPath';
+    }
+
+    if (normalizedPath.isEmpty) {
+      return '$trimmed/users';
+    }
+    return '$trimmed/users/$normalizedPath';
+  }
+
+  String _serviceBaseUrl() {
+    var base = _authServerBaseUrl.trim();
+    if (base.endsWith('/')) {
+      base = base.substring(0, base.length - 1);
+    }
+
+    if (base.endsWith('/auth')) {
+      return base.substring(0, base.length - '/auth'.length);
+    }
+    if (base.endsWith('/users')) {
+      return base.substring(0, base.length - '/users'.length);
+    }
+    return base;
+  }
+
+  Map<String, dynamic> _readPayload(dynamic data) {
+    if (data == null) return {};
+    if (data is Map<String, dynamic>) {
+      return data;
+    }
+    if (data is Map) {
+      return Map<String, dynamic>.from(data);
+    }
+    return {};
+  }
+
+  String _dioErrorMessage(DioException error, {required String fallback}) {
+    final data = error.response?.data;
+    if (data is Map) {
+      final message = data['error'] ?? data['message'];
+      if (message != null) {
+        return message.toString();
+      }
+    }
+    return error.message ?? fallback;
   }
 }

@@ -143,17 +143,6 @@ class ResetUserPasswordUseCase
   }
 }
 
-class ExchangeIdTokenUseCase implements UseCase<bool, ExchangeIdTokenParams> {
-  final UserAccessRepository repository;
-
-  const ExchangeIdTokenUseCase(this.repository);
-
-  @override
-  Future<Either<Failure, bool>> call(ExchangeIdTokenParams params) async {
-    return repository.exchangeIdToken(idToken: params.idToken);
-  }
-}
-
 class ExecuteUserActionParams {
   final String accessToken;
   final String resource;
@@ -241,10 +230,4 @@ class ResetUserPasswordParams {
     required this.accessToken,
     required this.userId,
   });
-}
-
-class ExchangeIdTokenParams {
-  final String idToken;
-
-  const ExchangeIdTokenParams({required this.idToken});
 }

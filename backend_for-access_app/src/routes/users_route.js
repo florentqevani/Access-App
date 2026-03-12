@@ -1,4 +1,5 @@
 import { Router } from "express";
+import bcrypt from "bcryptjs";
 import authenticate from "../middleware/auth_middleware.js";
 import authorizeRole from "../middleware/role_middleware.js";
 import requirePermission, {
@@ -6,7 +7,6 @@ import requirePermission, {
 } from "../middleware/permission_middleware.js";
 import { db } from "../data/store.js";
 import { sanitizeUser } from "../data/tokens.js";
-import { getFirebaseAuth, hasFirebaseAdminCredentials } from "../config/firebase.js";
 import { RBAC_PERMISSIONS, ROLE_NAMES } from "../rbac/constants.js";
 
 const router = Router();
@@ -65,96 +65,6 @@ function resolveDefaultPassword({ displayName }) {
   return username;
 }
 
-function firebaseClientApiKey() {
-  const key =
-    process.env.FIREBASE_CLIENT_API_KEY || process.env.FIREBASE_WEB_API_KEY;
-  if (typeof key !== "string") {
-    return null;
-  }
-  const trimmed = key.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
-function mapIdentityToolkitError(errorMessage, fallbackMessage) {
-  if (typeof errorMessage !== "string") {
-    return { status: 500, error: fallbackMessage };
-  }
-
-  if (errorMessage === "EMAIL_EXISTS") {
-    return { status: 409, error: "Email already exists." };
-  }
-  if (errorMessage.startsWith("WEAK_PASSWORD")) {
-    return {
-      status: 400,
-      error:
-        "Username must be at least 6 characters because default password equals username.",
-    };
-  }
-
-  return { status: 500, error: fallbackMessage };
-}
-
-async function parseIdentityToolkitJson(response) {
-  try {
-    return await response.json();
-  } catch (_) {
-    return {};
-  }
-}
-
-async function createFirebaseUserWithClientApiKey({
-  apiKey,
-  email,
-  password,
-  displayName,
-}) {
-  const signUpResponse = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        email,
-        password,
-        returnSecureToken: true,
-      }),
-    },
-  );
-
-  const signUpPayload = await parseIdentityToolkitJson(signUpResponse);
-  if (!signUpResponse.ok) {
-    const mapped = mapIdentityToolkitError(
-      signUpPayload?.error?.message,
-      "Failed to create Firebase user.",
-    );
-    throw mapped;
-  }
-
-  const uid = signUpPayload.localId;
-  const idToken = signUpPayload.idToken;
-  if (!uid || !idToken) {
-    throw { status: 500, error: "Failed to create Firebase user." };
-  }
-
-  const updateResponse = await fetch(
-    `https://identitytoolkit.googleapis.com/v1/accounts:update?key=${apiKey}`,
-    {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        idToken,
-        displayName,
-        returnSecureToken: true,
-      }),
-    },
-  );
-  if (!updateResponse.ok) {
-    throw { status: 500, error: "Failed to set Firebase username." };
-  }
-
-  return { uid };
-}
-
 router.get("/me", authenticate, async (req, res) => {
   const user = await db.findUserById(req.user.sub);
   if (!user) {
@@ -162,6 +72,43 @@ router.get("/me", authenticate, async (req, res) => {
   }
 
   return res.json({ user: sanitizeUser(user) });
+});
+
+router.patch("/me/profile", authenticate, async (req, res) => {
+  const displayName =
+    typeof req.body?.displayName === "string" ? req.body.displayName.trim() : "";
+
+  if (!displayName) {
+    return res.status(400).json({
+      error: "Display name is required.",
+    });
+  }
+
+  const updatedUser = await db.updateUserProfile({
+    userId: req.user.sub,
+    email: null,
+    displayName,
+  });
+  if (!updatedUser) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  await db.createAuditLog({
+    userId: req.user.sub,
+    eventType: "users_self_profile_updated",
+    ipAddress: getClientIp(req),
+    userAgent: getUserAgent(req),
+    metadata: {
+      actorUserId: req.user.sub,
+      targetUserId: req.user.sub,
+      displayName,
+    },
+  });
+
+  return res.json({
+    user: sanitizeUser(updatedUser),
+    message: "Profile updated successfully.",
+  });
 });
 
 router.get(
@@ -437,28 +384,13 @@ router.post(
       });
     }
 
-    if (!hasFirebaseAdminCredentials()) {
-      return res.status(503).json({
-        error:
-          "Password reset requires Firebase Admin credentials. Configure GOOGLE_APPLICATION_CREDENTIALS or FIREBASE_SERVICE_ACCOUNT_JSON.",
-      });
-    }
-
-    try {
-      await getFirebaseAuth().updateUser(targetUser.firebaseUid, {
-        password: defaultPassword,
-      });
-    } catch (error) {
-      if (error?.code === "auth/user-not-found") {
-        await getFirebaseAuth().createUser({
-          uid: targetUser.firebaseUid,
-          email: targetUser.email ?? undefined,
-          displayName: targetUser.displayName ?? undefined,
-          password: defaultPassword,
-        });
-      } else {
-        return res.status(500).json({ error: "Failed to reset password." });
-      }
+    const passwordHash = await bcrypt.hash(defaultPassword, 12);
+    const updated = await db.updateUserPasswordHash({
+      userId: targetUser.id,
+      passwordHash,
+    });
+    if (!updated) {
+      return res.status(500).json({ error: "Failed to reset password." });
     }
 
     await db.createAuditLog({
@@ -539,77 +471,20 @@ router.post(
       roleName = normalizedRole;
     }
 
-    let firebaseUid;
-    if (hasFirebaseAdminCredentials()) {
-      try {
-        const firebaseUser = await getFirebaseAuth().createUser({
-          email,
-          password: defaultPassword,
-          displayName,
-        });
-        firebaseUid = firebaseUser.uid;
-      } catch (error) {
-        if (error?.code === "auth/email-already-exists") {
-          return res.status(409).json({ error: "Email already exists." });
-        }
-        if (
-          error?.code === "auth/weak-password" ||
-          error?.code === "auth/invalid-password"
-        ) {
-          return res.status(400).json({
-            error:
-              "Username must be at least 6 characters because default password equals username.",
-          });
-        }
-        return res.status(500).json({
-          error: "Failed to create Firebase user.",
-        });
-      }
-    } else {
-      const apiKey = firebaseClientApiKey();
-      if (!apiKey) {
-        return res.status(503).json({
-          error:
-            "User creation needs Firebase credentials. Set GOOGLE_APPLICATION_CREDENTIALS/FIREBASE_SERVICE_ACCOUNT_JSON or FIREBASE_CLIENT_API_KEY.",
-        });
-      }
-      try {
-        const fallbackUser = await createFirebaseUserWithClientApiKey({
-          apiKey,
-          email,
-          password: defaultPassword,
-          displayName,
-        });
-        firebaseUid = fallbackUser.uid;
-      } catch (error) {
-        const status =
-          typeof error?.status === "number" ? error.status : 500;
-        const message =
-          typeof error?.error === "string"
-            ? error.error
-            : "Failed to create Firebase user.";
-        return res.status(status).json({ error: message });
-      }
+    const existingUser = await db.findUserByEmail(email);
+    if (existingUser) {
+      return res.status(409).json({ error: "Email already exists." });
     }
 
-    const createdUser = await db.upsertFirebaseUser({
-      firebaseUid,
+    const passwordHash = await bcrypt.hash(defaultPassword, 12);
+    const createdUser = await db.createUserWithPassword({
       email,
       displayName,
+      passwordHash,
+      roleName,
     });
     if (!createdUser) {
       return res.status(500).json({ error: "Failed to create DB user." });
-    }
-
-    let effectiveUser = createdUser;
-    if (roleName !== ROLE_NAMES.USER) {
-      const roleUpdatedUser = await db.updateUserRole({
-        userId: createdUser.id,
-        roleName,
-      });
-      if (roleUpdatedUser) {
-        effectiveUser = roleUpdatedUser;
-      }
     }
 
     await db.createAuditLog({
@@ -619,15 +494,15 @@ router.post(
       userAgent: getUserAgent(req),
       metadata: {
         actorUserId: req.user.sub,
-        targetUserId: effectiveUser.id,
-        role: effectiveUser.role,
-        email: effectiveUser.email,
+        targetUserId: createdUser.id,
+        role: createdUser.role,
+        email: createdUser.email,
         passwordStrategy: "default_password_equals_username",
       },
     });
 
     return res.status(201).json({
-      user: sanitizeUser(effectiveUser),
+      user: sanitizeUser(createdUser),
       defaultPassword,
       message: "User created. Default password is the username.",
     });

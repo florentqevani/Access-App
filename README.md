@@ -1,11 +1,10 @@
 # Access_app
 
-Flutter authentication app with Firebase Auth on the client and a local Node.js auth backend.
+Flutter authentication app with a local Node.js auth backend using PostgreSQL, JWT, and role-based permissions.
 
 ## Tech Stack
 
 - Flutter (Dart)
-- Firebase Auth + Firebase Core
 - flutter_bloc (state management)
 - Dio (HTTP client)
 - Node.js backend in `backend_for-access_app/`
@@ -21,8 +20,7 @@ access_app/
 ## Prerequisites
 
 - Flutter SDK (compatible with Dart `^3.11.0`)
-- Firebase project configured for your target platforms
-- (Optional, for full auth flow) Docker or local Node.js + PostgreSQL + Redis
+- Docker or local Node.js + PostgreSQL + Redis for backend auth
 
 ## Flutter Setup
 
@@ -32,14 +30,7 @@ access_app/
 flutter pub get
 ```
 
-2. Ensure Firebase platform config files are present.
-   If missing, run FlutterFire setup:
-
-```bash
-flutterfire configure
-```
-
-3. Run the app:
+2. Run the app:
 
 ```bash
 flutter run

@@ -179,18 +179,4 @@ class UserAccessRepositoryImpl implements UserAccessRepository {
       return left(Failure(error.toString()));
     }
   }
-
-  @override
-  Future<Either<Failure, bool>> exchangeIdToken({
-    required String idToken,
-  }) async {
-    try {
-      final result = await remoteDataSource.exchangeIdToken(idToken: idToken);
-      return right(result);
-    } on ServerException catch (error) {
-      return left(Failure(error.message));
-    } catch (error) {
-      return left(Failure(error.toString()));
-    }
-  }
 }

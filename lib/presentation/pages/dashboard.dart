@@ -5,7 +5,6 @@ import 'package:access_app/presentation/pages/logs_page.dart';
 import 'package:access_app/presentation/pages/reports.dart';
 import 'package:access_app/presentation/pages/settings.dart';
 import 'package:access_app/presentation/pages/users_dashboard.dart';
-import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
 
 class DashboardPage extends StatefulWidget {
@@ -29,7 +28,7 @@ class _DashboardPageState extends State<DashboardPage> {
   static const List<_DashboardAction> _actions = [
     _DashboardAction.navigate(
       title: 'Users',
-      subtitle: 'CRUD and role management',
+      subtitle: 'User and role management',
       destination: _DashboardDestination.users,
       icon: Icons.people_outline,
     ),
@@ -47,7 +46,7 @@ class _DashboardPageState extends State<DashboardPage> {
     ),
     _DashboardAction.navigate(
       title: 'Logs',
-      subtitle: 'Review persisted logs',
+      subtitle: 'Review logs',
       destination: _DashboardDestination.logs,
       icon: Icons.history_outlined,
     ),
@@ -115,16 +114,12 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           IconButton(
             onPressed: () async {
-              try {
-                await FirebaseAuth.instance.signOut();
-              } finally {
-                if (context.mounted) {
-                  Navigator.pushAndRemoveUntil(
-                    context,
-                    LoginPage.route(),
-                    (route) => false,
-                  );
-                }
+              if (context.mounted) {
+                Navigator.pushAndRemoveUntil(
+                  context,
+                  LoginPage.route(),
+                  (route) => false,
+                );
               }
             },
             icon: const Icon(Icons.logout),
@@ -141,10 +136,6 @@ class _DashboardPageState extends State<DashboardPage> {
               Text(
                 'Welcome, $displayName',
                 style: Theme.of(context).textTheme.headlineSmall,
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Actions below open modules and run allowed operations.',
               ),
               const SizedBox(height: 16),
               Expanded(
