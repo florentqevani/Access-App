@@ -1,8 +1,8 @@
 import 'package:access_app/domain/repository/auth_session.dart';
-import 'package:access_app/core/network/auth_server_config.dart';
-import 'package:dio/dio.dart';
+import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class UserSettingsPage extends StatefulWidget {
   final AuthSession session;
@@ -31,7 +31,6 @@ class UserSettingsPage extends StatefulWidget {
 }
 
 class _UserSettingsPageState extends State<UserSettingsPage> {
-  final Dio _dio = Dio();
   final TextEditingController _usernameController = TextEditingController();
   final TextEditingController _currentPasswordController =
       TextEditingController();
@@ -41,16 +40,8 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
 
   bool _isSavingUsername = false;
   bool _isChangingPassword = false;
+  bool _isSendingPasswordResetEmail = false;
   String? _liveDisplayName;
-
-  String get _authServerBaseUrl {
-    const configuredAuthServerBaseUrl = String.fromEnvironment(
-      'AUTH_SERVER_BASE_URL',
-    );
-    return resolveAuthServerBaseUrl(
-      configuredBaseUrl: configuredAuthServerBaseUrl,
-    );
-  }
 
   @override
   void initState() {
@@ -110,7 +101,7 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                           style: TextStyle(fontWeight: FontWeight.w600),
                         ),
                         const SizedBox(height: 8),
-                        Text('You can configure system settings.'),
+                        const Text('You can configure system settings.'),
                         const SizedBox(height: 8),
                         SizedBox(
                           width: double.infinity,
@@ -212,6 +203,20 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
                 ),
               ),
             ),
+            const SizedBox(height: 8),
+            SizedBox(
+              width: double.infinity,
+              child: OutlinedButton(
+                onPressed: _isSendingPasswordResetEmail
+                    ? null
+                    : _sendPasswordResetEmail,
+                child: Text(
+                  _isSendingPasswordResetEmail
+                      ? 'Sending...'
+                      : 'Send Password Reset Email',
+                ),
+              ),
+            ),
           ],
         ),
       ),
@@ -219,6 +224,7 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
   }
 
   Future<void> _changeUsername() async {
+    final exchangeIdTokenUseCase = context.read<ExchangeIdTokenUseCase>();
     final newName = _usernameController.text.trim();
     if (newName.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -243,10 +249,18 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
       await firebaseUser.updateDisplayName(newName);
       await firebaseUser.reload();
 
+      String? backendSyncError;
       final refreshedUser = FirebaseAuth.instance.currentUser;
       final idToken = await refreshedUser?.getIdToken(true);
       if (idToken != null && idToken.isNotEmpty) {
-        await _dio.post(_authEndpoint('exchange'), data: {'idToken': idToken});
+        final syncResponse = await exchangeIdTokenUseCase(
+          ExchangeIdTokenParams(idToken: idToken),
+        );
+
+        syncResponse.fold(
+          (failure) => backendSyncError = failure.message,
+          (_) => backendSyncError = null,
+        );
       }
 
       setState(() {
@@ -254,24 +268,24 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
       });
       widget.onDisplayNameUpdated?.call(newName);
 
-      if (!mounted) return;
+      if (!mounted) {
+        return;
+      }
+
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Username updated successfully.')),
+        SnackBar(
+          content: Text(
+            backendSyncError == null
+                ? 'Username updated successfully.'
+                : 'Username updated in Firebase, but backend sync failed: $backendSyncError',
+          ),
+        ),
       );
     } on FirebaseAuthException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text(error.message ?? 'Failed to update username.')),
       );
-    } on DioException catch (error) {
-      if (!mounted) return;
-      final message = _dioErrorMessage(
-        error,
-        fallback: 'Username updated in Firebase, but backend sync failed.',
-      );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -320,7 +334,23 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
         );
       }
 
-      if (firebaseUser.email != null && currentPassword.isNotEmpty) {
+      final hasPasswordProvider = firebaseUser.providerData.any(
+        (provider) => provider.providerId == 'password',
+      );
+
+      if (hasPasswordProvider && currentPassword.isEmpty) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              'Current password is required to change your password.',
+            ),
+          ),
+        );
+        return;
+      }
+
+      if (hasPasswordProvider && firebaseUser.email != null) {
         final credential = EmailAuthProvider.credential(
           email: firebaseUser.email!,
           password: currentPassword,
@@ -357,55 +387,76 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
     }
   }
 
-  Future<void> _executeSystemSettingsAction() async {
+  Future<void> _sendPasswordResetEmail() async {
+    final firebaseUser = FirebaseAuth.instance.currentUser;
+    final email = firebaseUser?.email?.trim();
+    if (email == null || email.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No email is available for password reset.'),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isSendingPasswordResetEmail = true;
+    });
+
     try {
-      final response = await _dio.post(
-        _usersEndpoint('actions/execute'),
-        data: {'resource': 'settings', 'action': 'configure'},
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final message = payload['message']?.toString() ?? 'Action executed.';
+      await FirebaseAuth.instance.sendPasswordResetEmail(email: email);
       if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } on DioException catch (error) {
-      if (!mounted) return;
-      final message = _dioErrorMessage(
-        error,
-        fallback: 'Failed to execute settings action.',
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Password reset email sent to $email.')),
       );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
+    } on FirebaseAuthException catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            error.message ?? 'Failed to send password reset email.',
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Failed to send password reset email.')),
+      );
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isSendingPasswordResetEmail = false;
+        });
+      }
     }
   }
 
-  Options _authorizedOptions() {
-    return Options(
-      headers: {'Authorization': 'Bearer ${widget.session.accessToken}'},
+  Future<void> _executeSystemSettingsAction() async {
+    final response = await context.read<ExecuteUserActionUseCase>()(
+      ExecuteUserActionParams(
+        accessToken: widget.session.accessToken,
+        resource: 'settings',
+        action: 'configure',
+      ),
     );
-  }
 
-  String _authEndpoint(String path) {
-    final trimmed = _authServerBaseUrl.endsWith('/')
-        ? _authServerBaseUrl.substring(0, _authServerBaseUrl.length - 1)
-        : _authServerBaseUrl;
-    if (trimmed.endsWith('/auth')) {
-      return '$trimmed/$path';
+    if (!mounted) {
+      return;
     }
-    return '$trimmed/auth/$path';
-  }
 
-  String _usersEndpoint(String path) {
-    final trimmed = _authServerBaseUrl.endsWith('/')
-        ? _authServerBaseUrl.substring(0, _authServerBaseUrl.length - 1)
-        : _authServerBaseUrl;
-    if (trimmed.endsWith('/users')) {
-      return '$trimmed/$path';
-    }
-    return '$trimmed/users/$path';
+    response.fold(
+      (failure) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failure.message)));
+      },
+      (result) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.message)));
+      },
+    );
   }
 
   String _firebasePasswordErrorMessage(FirebaseAuthException error) {
@@ -421,26 +472,4 @@ class _UserSettingsPageState extends State<UserSettingsPage> {
         return error.message ?? 'Failed to update password.';
     }
   }
-}
-
-Map<String, dynamic> _readPayload(dynamic data) {
-  if (data == null) return {};
-  if (data is Map<String, dynamic>) {
-    return data;
-  }
-  if (data is Map) {
-    return Map<String, dynamic>.from(data);
-  }
-  return {};
-}
-
-String _dioErrorMessage(DioException error, {required String fallback}) {
-  final data = error.response?.data;
-  if (data is Map) {
-    final message = data['error'] ?? data['message'];
-    if (message != null) {
-      return message.toString();
-    }
-  }
-  return error.message ?? fallback;
 }

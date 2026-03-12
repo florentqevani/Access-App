@@ -87,7 +87,7 @@ export async function runMigrations() {
     `);
 
     await client.query(`
-      CREATE TABLE IF NOT EXISTS audit_logs (
+      CREATE TABLE IF NOT EXISTS logs (
         id UUID PRIMARY KEY,
         user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         event_type VARCHAR(120) NOT NULL,
@@ -99,48 +99,84 @@ export async function runMigrations() {
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       ADD COLUMN IF NOT EXISTS ip_address INET;
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       ADD COLUMN IF NOT EXISTS user_agent TEXT;
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       ALTER COLUMN event_type TYPE VARCHAR(120);
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       DROP COLUMN IF EXISTS resource;
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       DROP COLUMN IF EXISTS action;
     `);
 
     await client.query(`
-      ALTER TABLE audit_logs
+      ALTER TABLE logs
       DROP COLUMN IF EXISTS scope;
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id
-        ON audit_logs (user_id);
+      DO $$
+      BEGIN
+        IF EXISTS (
+          SELECT 1
+          FROM information_schema.tables
+          WHERE table_schema = 'public'
+            AND table_name = 'audit_logs'
+        ) THEN
+          ALTER TABLE audit_logs
+          ADD COLUMN IF NOT EXISTS ip_address INET;
+
+          ALTER TABLE audit_logs
+          ADD COLUMN IF NOT EXISTS user_agent TEXT;
+
+          ALTER TABLE audit_logs
+          ADD COLUMN IF NOT EXISTS metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+          ALTER TABLE audit_logs
+          ALTER COLUMN event_type TYPE VARCHAR(120);
+
+          INSERT INTO logs (id, user_id, event_type, ip_address, user_agent, metadata, created_at)
+          SELECT
+            id,
+            user_id,
+            event_type,
+            ip_address,
+            user_agent,
+            COALESCE(metadata, '{}'::jsonb),
+            created_at
+          FROM audit_logs
+          ON CONFLICT (id) DO NOTHING;
+        END IF;
+      END $$;
     `);
 
     await client.query(`
-      CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at
-        ON audit_logs (created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_logs_user_id
+        ON logs (user_id);
+    `);
+
+    await client.query(`
+      CREATE INDEX IF NOT EXISTS idx_logs_created_at
+        ON logs (created_at DESC);
     `);
 
     await client.query("COMMIT");

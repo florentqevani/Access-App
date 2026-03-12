@@ -1,7 +1,8 @@
 import 'package:access_app/domain/repository/auth_session.dart';
-import 'package:access_app/core/network/auth_server_config.dart';
-import 'package:dio/dio.dart';
+import 'package:access_app/domain/repository/user_access_models.dart';
+import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class UsersCommandsPage extends StatefulWidget {
   final AuthSession session;
@@ -46,7 +47,6 @@ class UsersCommandsPage extends StatefulWidget {
 }
 
 class _UsersCommandsPageState extends State<UsersCommandsPage> {
-  final Dio _dio = Dio();
   final GlobalKey _editSectionKey = GlobalKey();
 
   final TextEditingController _createEmailController = TextEditingController();
@@ -61,7 +61,7 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
   final TextEditingController _roleUserIdController = TextEditingController();
   final TextEditingController _resetUserIdController = TextEditingController();
 
-  List<_RoleOption> _roles = const [];
+  List<RoleSummary> _roles = const [];
   String? _selectedCreateRole;
   String? _selectedManageRole;
   bool _isLoadingRoles = false;
@@ -71,15 +71,6 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
   bool _isDeleting = false;
   bool _isUpdatingRole = false;
   bool _isResettingPassword = false;
-
-  String get _authServerBaseUrl {
-    const configuredAuthServerBaseUrl = String.fromEnvironment(
-      'AUTH_SERVER_BASE_URL',
-    );
-    return resolveAuthServerBaseUrl(
-      configuredBaseUrl: configuredAuthServerBaseUrl,
-    );
-  }
 
   @override
   void initState() {
@@ -418,43 +409,35 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isLoadingRoles = true;
     });
-    try {
-      final response = await _dio.get(
-        _usersEndpoint('roles'),
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final raw = payload['roles'];
-      if (raw is! List) {
-        throw const FormatException('Invalid roles payload.');
-      }
-      final roles = raw
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .map(
-            (item) => _RoleOption(
-              name: item['name']?.toString() ?? '',
-              description: item['description']?.toString(),
-            ),
-          )
-          .where((role) => role.name.isNotEmpty)
-          .toList(growable: false);
-      setState(() {
-        _roles = roles;
-        _selectedCreateRole =
-            _selectedCreateRole ?? (roles.isNotEmpty ? roles.first.name : null);
-        _selectedManageRole =
-            _selectedManageRole ?? (roles.isNotEmpty ? roles.first.name : null);
-      });
-    } on DioException catch (error) {
-      _showMessage(_dioErrorMessage(error, fallback: 'Failed to load roles.'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isLoadingRoles = false;
-        });
-      }
+
+    final response = await context.read<GetRolesUseCase>()(
+      GetRolesParams(accessToken: widget.session.accessToken),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (roles) {
+        setState(() {
+          _roles = roles;
+          _selectedCreateRole =
+              _selectedCreateRole ??
+              (roles.isNotEmpty ? roles.first.name : null);
+          _selectedManageRole =
+              _selectedManageRole ??
+              (roles.isNotEmpty ? roles.first.name : null);
+        });
+      },
+    );
+
+    setState(() {
+      _isLoadingRoles = false;
+    });
   }
 
   Future<void> _createUser() async {
@@ -474,36 +457,37 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isCreating = true;
     });
-    try {
-      final body = <String, dynamic>{};
-      body['email'] = email;
-      body['displayName'] = displayName;
-      if (_selectedCreateRole != null) body['role'] = _selectedCreateRole;
 
-      final response = await _dio.post(
-        _usersEndpoint(''),
-        data: body,
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final createdUser = payload['user'];
-      final defaultPassword = payload['defaultPassword']?.toString();
-      _showMessage(
-        createdUser is Map
-            ? 'Created user ${createdUser['id'] ?? ''}. '
-                  'Default password: ${defaultPassword ?? '(username)'}'
-            : 'User created.',
-      );
-      widget.onDataChanged?.call();
-    } on DioException catch (error) {
-      _showMessage(_dioErrorMessage(error, fallback: 'Failed to create user.'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isCreating = false;
-        });
-      }
+    final response = await context.read<CreateUserUseCase>()(
+      CreateUserParams(
+        accessToken: widget.session.accessToken,
+        email: email,
+        displayName: displayName,
+        role: _selectedCreateRole,
+      ),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (result) {
+        _showMessage(
+          result.userId.isNotEmpty
+              ? 'Created user ${result.userId}. Default password: ${result.defaultPassword ?? '(username)'}'
+              : 'User created.',
+        );
+        widget.onDataChanged?.call();
+      },
+    );
+
+    setState(() {
+      _isCreating = false;
+    });
   }
 
   Future<void> _updateUser() async {
@@ -522,27 +506,33 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isUpdating = true;
     });
-    try {
-      final body = <String, dynamic>{};
-      if (email.isNotEmpty) body['email'] = email;
-      if (displayName.isNotEmpty) body['displayName'] = displayName;
 
-      await _dio.patch(
-        _usersEndpoint(userId),
-        data: body,
-        options: _authorizedOptions(),
-      );
-      _showMessage('User updated.');
-      widget.onDataChanged?.call();
-    } on DioException catch (error) {
-      _showMessage(_dioErrorMessage(error, fallback: 'Failed to update user.'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUpdating = false;
-        });
-      }
+    final response = await context.read<UpdateUserUseCase>()(
+      UpdateUserParams(
+        accessToken: widget.session.accessToken,
+        userId: userId,
+        email: email.isEmpty ? null : email,
+        displayName: displayName.isEmpty ? null : displayName,
+      ),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (_) {
+        _showMessage('User updated.');
+        widget.onDataChanged?.call();
+      },
+    );
+
+    setState(() {
+      _isUpdating = false;
+    });
   }
 
   Future<void> _deleteUser() async {
@@ -555,19 +545,28 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isDeleting = true;
     });
-    try {
-      await _dio.delete(_usersEndpoint(userId), options: _authorizedOptions());
-      _showMessage('User deleted.');
-      widget.onDataChanged?.call();
-    } on DioException catch (error) {
-      _showMessage(_dioErrorMessage(error, fallback: 'Failed to delete user.'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isDeleting = false;
-        });
-      }
+
+    final response = await context.read<DeleteUserUseCase>()(
+      DeleteUserParams(accessToken: widget.session.accessToken, userId: userId),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (_) {
+        _showMessage('User deleted.');
+        widget.onDataChanged?.call();
+      },
+    );
+
+    setState(() {
+      _isDeleting = false;
+    });
   }
 
   Future<void> _updateRole() async {
@@ -581,23 +580,32 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isUpdatingRole = true;
     });
-    try {
-      await _dio.patch(
-        _usersEndpoint('$userId/role'),
-        data: {'role': role},
-        options: _authorizedOptions(),
-      );
-      _showMessage('Role updated.');
-      widget.onDataChanged?.call();
-    } on DioException catch (error) {
-      _showMessage(_dioErrorMessage(error, fallback: 'Failed to update role.'));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isUpdatingRole = false;
-        });
-      }
+
+    final response = await context.read<UpdateUserRoleUseCase>()(
+      UpdateUserRoleParams(
+        accessToken: widget.session.accessToken,
+        userId: userId,
+        role: role,
+      ),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (_) {
+        _showMessage('Role updated.');
+        widget.onDataChanged?.call();
+      },
+    );
+
+    setState(() {
+      _isUpdatingRole = false;
+    });
   }
 
   Future<void> _resetUserPassword() async {
@@ -610,29 +618,34 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
     setState(() {
       _isResettingPassword = true;
     });
-    try {
-      final response = await _dio.post(
-        _usersEndpoint('$userId/password/reset'),
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final defaultPassword = payload['defaultPassword']?.toString();
-      _showMessage(
-        defaultPassword == null
-            ? 'Password reset.'
-            : 'Password reset. Default password: $defaultPassword',
-      );
-    } on DioException catch (error) {
-      _showMessage(
-        _dioErrorMessage(error, fallback: 'Failed to reset password.'),
-      );
-    } finally {
-      if (mounted) {
-        setState(() {
-          _isResettingPassword = false;
-        });
-      }
+
+    final response = await context.read<ResetUserPasswordUseCase>()(
+      ResetUserPasswordParams(
+        accessToken: widget.session.accessToken,
+        userId: userId,
+      ),
+    );
+
+    if (!mounted) {
+      return;
     }
+
+    response.fold(
+      (failure) {
+        _showMessage(failure.message);
+      },
+      (defaultPassword) {
+        _showMessage(
+          defaultPassword == null
+              ? 'Password reset.'
+              : 'Password reset. Default password: $defaultPassword',
+        );
+      },
+    );
+
+    setState(() {
+      _isResettingPassword = false;
+    });
   }
 
   void _showMessage(String message) {
@@ -641,56 +654,4 @@ class _UsersCommandsPageState extends State<UsersCommandsPage> {
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
   }
-
-  Options _authorizedOptions() {
-    return Options(
-      headers: {'Authorization': 'Bearer ${widget.session.accessToken}'},
-    );
-  }
-
-  String _usersEndpoint(String path) {
-    final trimmed = _authServerBaseUrl.endsWith('/')
-        ? _authServerBaseUrl.substring(0, _authServerBaseUrl.length - 1)
-        : _authServerBaseUrl;
-
-    final normalizedPath = path.trim();
-    if (trimmed.endsWith('/users')) {
-      if (normalizedPath.isEmpty) return trimmed;
-      return '$trimmed/$normalizedPath';
-    }
-
-    if (normalizedPath.isEmpty) {
-      return '$trimmed/users';
-    }
-    return '$trimmed/users/$normalizedPath';
-  }
-}
-
-class _RoleOption {
-  final String name;
-  final String? description;
-
-  const _RoleOption({required this.name, required this.description});
-}
-
-Map<String, dynamic> _readPayload(dynamic data) {
-  if (data == null) return {};
-  if (data is Map<String, dynamic>) {
-    return data;
-  }
-  if (data is Map) {
-    return Map<String, dynamic>.from(data);
-  }
-  return {};
-}
-
-String _dioErrorMessage(DioException error, {required String fallback}) {
-  final data = error.response?.data;
-  if (data is Map) {
-    final message = data['error'] ?? data['message'];
-    if (message != null) {
-      return message.toString();
-    }
-  }
-  return error.message ?? fallback;
 }

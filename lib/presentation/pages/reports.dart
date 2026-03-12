@@ -1,7 +1,7 @@
 import 'package:access_app/domain/repository/auth_session.dart';
-import 'package:access_app/core/network/auth_server_config.dart';
-import 'package:dio/dio.dart';
+import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class ReportsPage extends StatefulWidget {
   final AuthSession session;
@@ -19,17 +19,7 @@ class ReportsPage extends StatefulWidget {
 }
 
 class _ReportsPageState extends State<ReportsPage> {
-  final Dio _dio = Dio();
   String? _runningAction;
-
-  String get _authServerBaseUrl {
-    const configuredAuthServerBaseUrl = String.fromEnvironment(
-      'AUTH_SERVER_BASE_URL',
-    );
-    return resolveAuthServerBaseUrl(
-      configuredBaseUrl: configuredAuthServerBaseUrl,
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -130,72 +120,33 @@ class _ReportsPageState extends State<ReportsPage> {
       _runningAction = action;
     });
 
-    try {
-      final response = await _dio.post(
-        _usersEndpoint('actions/execute'),
-        data: {'resource': 'reports', 'action': action},
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final message = payload['message']?.toString() ?? 'Action executed.';
-
-      if (!mounted) return;
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } on DioException catch (error) {
-      if (!mounted) return;
-      final message = _dioErrorMessage(
-        error,
-        fallback: 'Failed to execute report action.',
-      );
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } finally {
-      if (mounted) {
-        setState(() {
-          _runningAction = null;
-        });
-      }
-    }
-  }
-
-  Options _authorizedOptions() {
-    return Options(
-      headers: {'Authorization': 'Bearer ${widget.session.accessToken}'},
+    final response = await context.read<ExecuteUserActionUseCase>()(
+      ExecuteUserActionParams(
+        accessToken: widget.session.accessToken,
+        resource: 'reports',
+        action: action,
+      ),
     );
-  }
 
-  String _usersEndpoint(String path) {
-    final trimmed = _authServerBaseUrl.endsWith('/')
-        ? _authServerBaseUrl.substring(0, _authServerBaseUrl.length - 1)
-        : _authServerBaseUrl;
-    if (trimmed.endsWith('/users')) {
-      return '$trimmed/$path';
+    if (!mounted) {
+      return;
     }
-    return '$trimmed/users/$path';
-  }
-}
 
-Map<String, dynamic> _readPayload(dynamic data) {
-  if (data == null) return {};
-  if (data is Map<String, dynamic>) {
-    return data;
-  }
-  if (data is Map) {
-    return Map<String, dynamic>.from(data);
-  }
-  return {};
-}
+    response.fold(
+      (failure) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(failure.message)));
+      },
+      (result) {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text(result.message)));
+      },
+    );
 
-String _dioErrorMessage(DioException error, {required String fallback}) {
-  final data = error.response?.data;
-  if (data is Map) {
-    final message = data['error'] ?? data['message'];
-    if (message != null) {
-      return message.toString();
-    }
+    setState(() {
+      _runningAction = null;
+    });
   }
-  return error.message ?? fallback;
 }

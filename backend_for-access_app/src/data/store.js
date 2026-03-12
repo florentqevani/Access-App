@@ -405,7 +405,7 @@ export const db = {
   }) {
     const result = await pgPool.query(
       `
-      INSERT INTO audit_logs (
+      INSERT INTO logs (
         id,
         user_id,
         event_type,
@@ -461,7 +461,7 @@ export const db = {
         u.email,
         u.display_name,
         r.name AS role
-      FROM audit_logs l
+      FROM logs l
       JOIN users u ON u.id = l.user_id
       JOIN roles r ON r.id = u.role_id
       WHERE ($1::boolean = true OR l.user_id = $2)

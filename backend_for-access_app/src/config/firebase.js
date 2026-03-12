@@ -1,5 +1,5 @@
 import admin from "firebase-admin";
-import fs from "fs";
+import fs from "node:fs";
 
 export function initFirebaseAdmin() {
   if (admin.apps.length > 0) {
@@ -30,8 +30,6 @@ export function initFirebaseAdmin() {
     return;
   }
 
-  // Fallback mode: allows verifyIdToken() signature checks without crashing
-  // when a service-account file is not mounted in Docker.
   admin.initializeApp({ projectId });
 }
 

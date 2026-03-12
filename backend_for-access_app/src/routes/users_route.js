@@ -243,6 +243,50 @@ router.post("/actions/execute", authenticate, async (req, res) => {
   });
 });
 
+router.get("/logs/role-scoped", authenticate, async (req, res) => {
+  const viewer = await db.findUserById(req.user.sub);
+  if (!viewer) {
+    return res.status(404).json({ error: "User not found" });
+  }
+
+  const role = String(viewer.role ?? "")
+    .trim()
+    .toLowerCase();
+  if (role !== ROLE_NAMES.ADMIN && role !== ROLE_NAMES.MANAGER) {
+    return res.status(403).json({
+      error: "Forbidden: role does not have access to logs.",
+    });
+  }
+
+  const includeAll = role === ROLE_NAMES.ADMIN;
+  const limit = Number.parseInt(String(req.query.limit ?? "20"), 10);
+  const normalizedLimit = Number.isNaN(limit) ? 20 : limit;
+
+  const logs = await db.listAuditLogs({
+    viewerUserId: req.user.sub,
+    includeAll,
+    limit: normalizedLimit,
+  });
+
+  await db.createAuditLog({
+    userId: req.user.sub,
+    eventType: "audit_logs_viewed",
+    ipAddress: getClientIp(req),
+    userAgent: getUserAgent(req),
+    metadata: {
+      actorUserId: req.user.sub,
+      role,
+      visibility: includeAll ? "all" : "own",
+      limit: normalizedLimit,
+    },
+  });
+
+  return res.json({
+    logs,
+    visibility: includeAll ? "all" : "own",
+  });
+});
+
 router.get(
   "/logs",
   authenticate,

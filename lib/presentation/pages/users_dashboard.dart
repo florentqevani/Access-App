@@ -1,8 +1,9 @@
 import 'package:access_app/domain/repository/auth_session.dart';
-import 'package:access_app/core/network/auth_server_config.dart';
+import 'package:access_app/domain/repository/user_access_models.dart';
+import 'package:access_app/domain/use_cases/user_access_use_cases.dart';
 import 'package:access_app/presentation/pages/users_commands.dart';
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_bloc/flutter_bloc.dart';
 
 class UsersDashboardPage extends StatefulWidget {
   final AuthSession session;
@@ -20,20 +21,9 @@ class UsersDashboardPage extends StatefulWidget {
 }
 
 class _UsersDashboardPageState extends State<UsersDashboardPage> {
-  final Dio _dio = Dio();
-
-  final List<_UserRow> _users = [];
+  final List<UserSummary> _users = [];
   bool _isLoadingUsers = false;
   String? _usersError;
-
-  String get _authServerBaseUrl {
-    const configuredAuthServerBaseUrl = String.fromEnvironment(
-      'AUTH_SERVER_BASE_URL',
-    );
-    return resolveAuthServerBaseUrl(
-      configuredBaseUrl: configuredAuthServerBaseUrl,
-    );
-  }
 
   @override
   void initState() {
@@ -187,7 +177,7 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
     );
   }
 
-  void _openUserManagement({_UserRow? prefillUser}) {
+  void _openUserManagement({UserSummary? prefillUser}) {
     Navigator.push(
       context,
       UsersCommandsPage.route(
@@ -207,96 +197,32 @@ class _UsersDashboardPageState extends State<UsersDashboardPage> {
       _usersError = null;
     });
 
-    try {
-      final response = await _dio.get(
-        _usersEndpoint(''),
-        queryParameters: {'limit': 200},
-        options: _authorizedOptions(),
-      );
-      final payload = _readPayload(response.data);
-      final rawUsers = payload['users'];
+    final response = await context.read<GetUsersUseCase>()(
+      GetUsersParams(accessToken: widget.session.accessToken, limit: 200),
+    );
 
-      if (rawUsers is! List) {
-        throw const FormatException('Invalid users payload.');
-      }
+    if (!mounted) {
+      return;
+    }
 
-      final users = rawUsers
-          .whereType<Map>()
-          .map((item) => Map<String, dynamic>.from(item))
-          .map(_UserRow.fromMap)
-          .toList(growable: false);
-
-      setState(() {
-        _users
-          ..clear()
-          ..addAll(users);
-      });
-    } on DioException catch (error) {
-      setState(() {
-        _usersError = _dioErrorMessage(
-          error,
-          fallback: 'Failed to load users.',
-        );
-      });
-    } catch (_) {
-      setState(() {
-        _usersError = 'Failed to load users.';
-      });
-    } finally {
-      if (mounted) {
+    response.fold(
+      (failure) {
         setState(() {
-          _isLoadingUsers = false;
+          _usersError = failure.message;
         });
-      }
-    }
-  }
-
-  Options _authorizedOptions() {
-    return Options(
-      headers: {'Authorization': 'Bearer ${widget.session.accessToken}'},
+      },
+      (users) {
+        setState(() {
+          _users
+            ..clear()
+            ..addAll(users);
+        });
+      },
     );
-  }
 
-  String _usersEndpoint(String path) {
-    final trimmed = _authServerBaseUrl.endsWith('/')
-        ? _authServerBaseUrl.substring(0, _authServerBaseUrl.length - 1)
-        : _authServerBaseUrl;
-    final normalizedPath = path.trim();
-    if (trimmed.endsWith('/users')) {
-      if (normalizedPath.isEmpty) return trimmed;
-      return '$trimmed/$normalizedPath';
-    }
-    if (normalizedPath.isEmpty) {
-      return '$trimmed/users';
-    }
-    return '$trimmed/users/$normalizedPath';
-  }
-}
-
-class _UserRow {
-  final String id;
-  final String? email;
-  final String? displayName;
-  final String role;
-  final DateTime? createdAt;
-
-  const _UserRow({
-    required this.id,
-    required this.email,
-    required this.displayName,
-    required this.role,
-    required this.createdAt,
-  });
-
-  factory _UserRow.fromMap(Map<String, dynamic> map) {
-    final rawCreated = map['createdAt'] ?? map['created_at'];
-    return _UserRow(
-      id: map['id']?.toString() ?? '',
-      email: map['email']?.toString(),
-      displayName: map['displayName']?.toString(),
-      role: map['role']?.toString() ?? 'unknown',
-      createdAt: rawCreated is String ? DateTime.tryParse(rawCreated) : null,
-    );
+    setState(() {
+      _isLoadingUsers = false;
+    });
   }
 }
 
@@ -306,26 +232,4 @@ String _formatDate(DateTime? value) {
   final month = local.month.toString().padLeft(2, '0');
   final day = local.day.toString().padLeft(2, '0');
   return '${local.year}-$month-$day';
-}
-
-Map<String, dynamic> _readPayload(dynamic data) {
-  if (data == null) return {};
-  if (data is Map<String, dynamic>) {
-    return data;
-  }
-  if (data is Map) {
-    return Map<String, dynamic>.from(data);
-  }
-  return {};
-}
-
-String _dioErrorMessage(DioException error, {required String fallback}) {
-  final data = error.response?.data;
-  if (data is Map) {
-    final message = data['error'] ?? data['message'];
-    if (message != null) {
-      return message.toString();
-    }
-  }
-  return error.message ?? fallback;
 }
