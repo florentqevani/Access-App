@@ -24,7 +24,6 @@ class _LogsPageState extends State<LogsPage> {
 
   String get _roleName => widget.session.user.role.trim().toLowerCase();
   bool get _canViewLogs => _roleName == 'admin' || _roleName == 'manager';
-  bool get _canViewAllLogs => _roleName == 'admin';
 
   @override
   void initState() {
