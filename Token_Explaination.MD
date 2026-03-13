@@ -23,10 +23,10 @@
 
 - A token is composed of 3 parts: 
 
-- Header: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.
-- Payload:  eyJzdWIiOiJjYWVlNjBmNC04N2FjLTRmZTItYTZiMi0yYTI2MjBmMWQ1MTkiLCJlbWFpbCI6InVzZXJAZ21haWwuY29tIiwicm9sZSI6InVzZXIiLCJwZXJtaXNzaW9ucyI6W10sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3NzM0MDUxNTUsImV4cCI6MTc3MzQwNjA1NX0
+- Header: `eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.`
+- Payload:  `eyJzdWIiOiJjYWVlNjBmNC04N2FjLTRmZTItYTZiMi0yYTI2MjBmMWQ1MTkiLCJlbWFpbCI6InVzZXJAZ21haWwuY29tIiwicm9sZSI6InVzZXIiLCJwZXJtaXNzaW9ucyI6W10sInR5cGUiOiJhY2Nlc3MiLCJpYXQiOjE3NzM0MDUxNTUsImV4cCI6MTc3MzQwNjA1NX0`
 
-- Signature: .ipGnMZHRCks7Wj-EOxR7pIMD0ZjZlYVm8dORLwSlbvQ
+- Signature: `.ipGnMZHRCks7Wj-EOxR7pIMD0ZjZlYVm8dORLwSlbvQ`
 
 - Header decides the token type and configuration
 - Payload has login credentials, user permissions and meta data like logs
