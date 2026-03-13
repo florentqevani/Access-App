@@ -248,10 +248,7 @@ Backend URL defaults:
 - Android emulator: `http://10.0.2.2:3000`
 - Web/Desktop/iOS simulator: `http://localhost:3000`
 
-Override explicitly when needed:
 
-```bash
-flutter run --dart-define=AUTH_SERVER_BASE_URL=http://localhost:3000
 ```
 
 ### Run backend without Docker

@@ -54,7 +54,7 @@ export function getExpiryDate(tokenDuration) {
   }
 
   const [, value, unit] = match;
-  return new Date(Date.now() + parseInt(value, 10) * units[unit]);
+  return new Date(Date.now() + Number.parseInt(value, 10) * units[unit]);
 }
 
 export function sanitizeUser(user) {
